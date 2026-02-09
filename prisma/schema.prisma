@@ -1,0 +1,323 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  STAFF
+  CUSTOMER
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  role      UserRole @default(CUSTOMER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Package {
+  id       String  @id @default(uuid())
+  code     String  @unique
+  isActive Boolean @default(true)
+
+  adultPriceMXN  Int
+  childPriceMXN  Int @default(0)
+  infantPriceMXN Int @default(0)
+
+  currency String @default("MXN")
+
+  maxAdults   Int?
+  maxChildren Int?
+  maxInfants  Int?
+
+  ageRules Json?
+
+  translations PackageTranslation[]
+  extras       PackageExtra[]
+  campaigns    Campaign[]
+  reservations Reservation[]
+
+  // imagen principal del paquete
+  coverMediaId String?
+  coverMedia   MediaAsset? @relation("PackageCover", fields: [coverMediaId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+
+/**
+ * PACKAGE TRANSLATION
+ * - name / description en ES/EN
+ * - includes/excludes/notes como lista (Json array)
+ */
+model PackageTranslation {
+  id          String  @id @default(uuid())
+  packageId   String
+  lang        String // "es" | "en"
+  name        String
+  description String?
+
+  // Listas:
+  // ["Ceremonia de bienvenida", "Acceso a cenote...", ...]
+  includes Json?
+  excludes Json?
+  notes    Json?
+
+  package Package @relation(fields: [packageId], references: [id])
+
+  @@unique([packageId, lang])
+}
+
+/**
+ * EXTRAS DEL PAQUETE (buffet, bebidas, etc)
+ */
+model PackageExtra {
+  id         String  @id @default(uuid())
+  packageId  String
+  code       String // "BUFFET" | "BEBIDAS" | "CHALECO" ...
+  priceMXN   Int // en centavos
+  currency   String  @default("MXN")
+  isRequired Boolean @default(false)
+  isActive   Boolean @default(true)
+
+  translations PackageExtraTranslation[]
+  package      Package                   @relation(fields: [packageId], references: [id])
+
+  @@unique([packageId, code])
+}
+
+/**
+ * EXTRA TRANSLATION (ES/EN)
+ */
+model PackageExtraTranslation {
+  id          String  @id @default(uuid())
+  extraId     String
+  lang        String // "es" | "en"
+  name        String
+  description String?
+
+  extra PackageExtra @relation(fields: [extraId], references: [id])
+
+  @@unique([extraId, lang])
+}
+
+model Campaign {
+  id       String  @id @default(uuid())
+  code     String  @unique
+  name     String
+  source   String?
+  isActive Boolean @default(true)
+
+  packageId String?
+  package   Package? @relation(fields: [packageId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/**
+ * RESERVATION
+ * - Guarda el paquete elegido
+ * - Guarda tracking
+ * - Guarda cupón
+ * - Guarda totals
+ * - Guarda snapshot de lo vendido (incluye/no incluye/notas + reglas de edad)
+ * - Guarda extras seleccionados (ReservationExtra)
+ */
+model Reservation {
+  id    String @id @default(uuid())
+  folio String @unique
+
+  packageId String
+  package   Package @relation(fields: [packageId], references: [id])
+
+  visitDate DateTime
+  adults    Int
+  children  Int
+  infants   Int
+
+  // contacto
+  firstName String?
+  lastName  String?
+  email     String?
+  phone     String?
+  country   String?
+  comments  String?
+
+  // tracking
+  campaignCode String?
+  utmSource    String?
+  utmMedium    String?
+  utmCampaign  String?
+  utmContent   String?
+  utmTerm      String?
+  fbclid       String?
+  ttclid       String?
+
+  // cupón
+  couponCode  String?
+  discountMXN Int     @default(0)
+
+  // totales
+  subtotalMXN Int @default(0) // personas (adult/child/infant)
+  extrasMXN   Int @default(0) // extras seleccionados
+  totalMXN    Int @default(0)
+
+  currency String @default("MXN")
+
+  status String @default("DRAFT")
+
+  // ✅ snapshot del paquete en el momento de la compra (para no cambiar el pasado)
+  snapshotLang        String? // "es" o "en" que se usó para mostrar/guardar
+  snapshotName        String?
+  snapshotDescription String?
+  snapshotIncludes    Json?
+  snapshotExcludes    Json?
+  snapshotNotes       Json?
+  snapshotAgeRules    Json?
+
+  extras   ReservationExtra[]
+  payments Payment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/**
+ * Extras seleccionados en la reservación
+ * - Guarda precio unitario y nombre (snapshot)
+ */
+model ReservationExtra {
+  id            String  @id @default(uuid())
+  reservationId String
+  extraId       String?
+
+  code     String // "BUFFET" etc
+  qty      Int    @default(1)
+  priceMXN Int // unitario en el momento de la compra
+  currency String @default("MXN")
+
+  // snapshot del nombre/desc en el idioma elegido
+  name        String?
+  description String?
+
+  reservation Reservation @relation(fields: [reservationId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([reservationId])
+}
+
+model Payment {
+  id            String @id @default(uuid())
+  reservationId String
+  provider      String
+  method        String
+  status        String @default("PENDING")
+
+  amountMXN Int
+  reference String?
+
+  reservation Reservation @relation(fields: [reservationId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum CouponType {
+  PERCENT
+  FIXED
+}
+
+enum CouponScope {
+  ALL
+  PACKAGE_ONLY
+  CAMPAIGN_ONLY
+}
+
+model Coupon {
+  id   String @id @default(uuid())
+  code String @unique
+
+  type  CouponType
+  value Int
+  scope CouponScope
+
+  isActive Boolean   @default(true)
+  startsAt DateTime?
+  endsAt   DateTime?
+  maxUses  Int?
+  uses     Int       @default(0)
+
+  packageId  String?
+  campaignId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum MediaKind {
+  IMAGE
+  VIDEO
+}
+
+model MediaAsset {
+  id        String    @id @default(uuid())
+  kind      MediaKind
+  mimeType  String
+  ext       String
+  size      Int
+
+  originalName String
+  filename     String
+  path         String
+  url          String
+
+  width     Int?
+  height    Int?
+  duration  Int?
+
+  isActive  Boolean   @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  heroSlides   HeroCarouselSlide[]
+
+  // ✅ NUEVO: packages que usan este media como cover
+  packageCovers Package[] @relation("PackageCover")
+}
+
+
+model HeroCarouselSlide {
+  id        String   @id @default(uuid())
+  order     Int      @default(0)
+  isActive  Boolean  @default(true)
+
+  // contenido opcional por slide
+  title     String?
+  subtitle  String?
+  linkUrl   String?
+  linkText  String?
+
+  // para accesibilidad / SEO
+  altText   String?
+
+  mediaId   String
+  media     MediaAsset @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([order])
+  @@index([isActive])
+}
+
