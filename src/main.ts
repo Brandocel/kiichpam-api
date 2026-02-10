@@ -15,6 +15,7 @@ async function bootstrap() {
     'http://127.0.0.1:3000',
     'http://localhost:5173', // por si usas Vite a veces
     'https://determined-dirac.159-223-194-251.plesk.page',
+    'https://kichpam-api.onrender.com',
     // agrega aquí tu dominio final cuando lo tengas:
     // 'https://tudominio.com',
   ];
