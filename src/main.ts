@@ -9,12 +9,36 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  // ✅ Orígenes permitidos (frontend)
+  const allowedOrigins = [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'http://localhost:5173', // por si usas Vite a veces
+    'https://determined-dirac.159-223-194-251.plesk.page',
+    // agrega aquí tu dominio final cuando lo tengas:
+    // 'https://tudominio.com',
+  ];
+
   app.enableCors({
-    origin: ['http://localhost:3001', 'http://localhost:5173'],
-    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    origin: (origin, callback) => {
+      // Permite llamadas sin origin (Postman, curl, server-to-server)
+      if (!origin) return callback(null, true);
+
+      // Permite si está en la lista
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      // Bloquea si no está permitido
+      return callback(new Error(`CORS blocked for origin: ${origin}`), false);
+    },
     credentials: true,
+    methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   });
+
+  // ✅ (Opcional pero recomendado) preflight rápido
+  app.options('*', (req, res) => res.sendStatus(204));
 
   app.useGlobalPipes(
     new ValidationPipe({
@@ -39,4 +63,5 @@ async function bootstrap() {
 
   await app.listen(process.env.PORT ?? 3000);
 }
+
 bootstrap();
