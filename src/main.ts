@@ -38,7 +38,7 @@ async function bootstrap() {
   const allowedOrigins = [
     'http://localhost:3001',
     'http://localhost:3000',
-    'https://kiichpam-api-jpuw6.ondigitalocean.app/',
+    'https://kiichpam-api-jpuw6.ondigitalocean.app',
     // 'https://tudominio.com',
   ];
 
