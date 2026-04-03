@@ -8,6 +8,8 @@ import { MediaModule } from './modules/media/media.module';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
 import { HeroModule } from './modules/hero/hero.module';
+import { PaymentsModule } from './modules/payments/payments.module';
+import { ProposalReservationsModule } from './modules/proposal-reservations/proposal-reservations.module';
 
 
 @Module({
@@ -23,6 +25,8 @@ import { HeroModule } from './modules/hero/hero.module';
     CouponsModule,
     MediaModule,
     HeroModule,
+    PaymentsModule,
+    ProposalReservationsModule,
 
   ],
 })

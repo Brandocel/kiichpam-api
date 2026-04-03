@@ -1,5 +1,17 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsArray, IsDateString, IsInt, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
+import {
+  ApiProperty,
+  ApiPropertyOptional,
+} from '@nestjs/swagger';
+import {
+  IsArray,
+  IsDateString,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+  ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 class SelectedExtraDto {
@@ -38,13 +50,17 @@ export class QuoteDto {
   @Min(0)
   infants: number;
 
-  // cupón
+  @ApiPropertyOptional({ example: 1 })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  inapamVisitors?: number;
+
   @ApiPropertyOptional({ example: 'PROMO10' })
   @IsOptional()
   @IsString()
   couponCode?: string;
 
-  // campaign
   @ApiPropertyOptional({ example: 'FB-ENERO' })
   @IsOptional()
   @IsString()
@@ -85,13 +101,11 @@ export class QuoteDto {
   @IsString()
   ttclid?: string;
 
-  // idioma para snapshot (es/en)
   @ApiPropertyOptional({ example: 'es' })
   @IsOptional()
   @IsString()
   lang?: string;
 
-  // ✅ extras seleccionados
   @ApiPropertyOptional({ type: [SelectedExtraDto] })
   @IsOptional()
   @IsArray()

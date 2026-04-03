@@ -1,0 +1,4 @@
+-- AlterTable
+ALTER TABLE "Reservation" ADD COLUMN     "couponDiscountMXN" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN     "inapamDiscountMXN" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN     "inapamVisitors" INTEGER NOT NULL DEFAULT 0;

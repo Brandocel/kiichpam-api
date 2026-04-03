@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ValidationPipe } from '@nestjs/common';
+import * as express from 'express';
 
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
@@ -9,44 +10,73 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // ✅ Orígenes permitidos (frontend)
+  /**
+   * =========================================================
+   * Stripe Webhook
+   * =========================================================
+   * Stripe necesita el body "crudo" (raw body) para validar la
+   * firma del header Stripe-Signature.
+   *
+   * IMPORTANTE:
+   * Esta línea debe ir ANTES de express.json()
+   */
+  app.use('/payments/webhook', express.raw({ type: 'application/json' }));
+
+  /**
+   * =========================================================
+   * Parsers normales para el resto de endpoints
+   * =========================================================
+   */
+  app.use(express.json());
+  app.use(express.urlencoded({ extended: true }));
+
+  /**
+   * =========================================================
+   * CORS
+   * =========================================================
+   */
   const allowedOrigins = [
+    'http://localhost:3001',
     'http://localhost:3000',
-    'http://127.0.0.1:3000',
-    'http://localhost:5173', // por si usas Vite a veces
+    'http://localhost:5173',
     'https://determined-dirac.159-223-194-251.plesk.page',
     'https://kiichpam-api.onrender.com',
-    // agrega aquí tu dominio final cuando lo tengas:
     // 'https://tudominio.com',
   ];
 
   app.enableCors({
     origin: (origin, callback) => {
-      // Permite llamadas sin origin (Postman, curl, server-to-server)
+      // Permite Postman, curl, Stripe, server-to-server, etc.
       if (!origin) return callback(null, true);
 
-      // Permite si está en la lista
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
 
-      // Bloquea si no está permitido
       return callback(new Error(`CORS blocked for origin: ${origin}`), false);
     },
     credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Stripe-Signature'],
   });
 
-  // ✅ (Opcional pero recomendado) preflight rápido
+  /**
+   * =========================================================
+   * Preflight OPTIONS
+   * =========================================================
+   */
   app.use((req, res, next) => {
     if (req.method === 'OPTIONS') {
-      res.sendStatus(204);
-    } else {
-      next();
+      return res.sendStatus(204);
     }
+    next();
   });
 
+  /**
+   * =========================================================
+   * Pipes globales
+   * =========================================================
+   */
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -55,9 +85,19 @@ async function bootstrap() {
     }),
   );
 
+  /**
+   * =========================================================
+   * Interceptors / Filters
+   * =========================================================
+   */
   app.useGlobalInterceptors(new ResponseInterceptor());
   app.useGlobalFilters(new HttpExceptionFilter());
 
+  /**
+   * =========================================================
+   * Swagger
+   * =========================================================
+   */
   const config = new DocumentBuilder()
     .setTitle('Kichpam API')
     .setDescription('API de reservaciones de paquetes')
@@ -68,6 +108,11 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('docs', app, document);
 
+  /**
+   * =========================================================
+   * Start server
+   * =========================================================
+   */
   await app.listen(process.env.PORT ?? 3000);
 }
 
