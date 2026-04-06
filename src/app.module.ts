@@ -5,19 +5,12 @@ import { PackagesModule } from './modules/packages/packages.module';
 import { ReservationsModule } from './modules/reservations/reservations.module';
 import { CouponsModule } from './modules/coupons/coupons.module';
 import { MediaModule } from './modules/media/media.module';
-import { ServeStaticModule } from '@nestjs/serve-static';
-import { join } from 'path';
 import { HeroModule } from './modules/hero/hero.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { ProposalReservationsModule } from './modules/proposal-reservations/proposal-reservations.module';
 
-
 @Module({
   imports: [
-    ServeStaticModule.forRoot({
-      rootPath: join(process.cwd(), 'uploads'), // carpeta física
-      serveRoot: '/uploads',                    // ruta pública
-    }),
     PrismaModule,
     HealthModule,
     PackagesModule,
@@ -27,7 +20,6 @@ import { ProposalReservationsModule } from './modules/proposal-reservations/prop
     HeroModule,
     PaymentsModule,
     ProposalReservationsModule,
-
   ],
 })
 export class AppModule {}

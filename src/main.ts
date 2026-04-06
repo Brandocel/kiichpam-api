@@ -3,6 +3,8 @@ import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ValidationPipe } from '@nestjs/common';
 import * as express from 'express';
+import { join } from 'path';
+import { existsSync, mkdirSync } from 'fs';
 
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
@@ -10,21 +12,39 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  const uploadsPath = join(process.cwd(), 'uploads');
+
+  // asegurar que exista la carpeta uploads
+  if (!existsSync(uploadsPath)) {
+    mkdirSync(uploadsPath, { recursive: true });
+  }
+
   /**
    * =========================================================
    * Stripe Webhook
    * =========================================================
-   * Stripe necesita el body "crudo" (raw body) para validar la
-   * firma del header Stripe-Signature.
-   *
-   * IMPORTANTE:
-   * Esta línea debe ir ANTES de express.json()
    */
   app.use('/payments/webhook', express.raw({ type: 'application/json' }));
 
   /**
    * =========================================================
-   * Parsers normales para el resto de endpoints
+   * Static uploads
+   * =========================================================
+   */
+  app.use(
+    '/uploads',
+    express.static(uploadsPath, {
+      index: false,
+      fallthrough: false,
+      redirect: false,
+      etag: true,
+      maxAge: '7d',
+    }),
+  );
+
+  /**
+   * =========================================================
+   * Parsers normales
    * =========================================================
    */
   app.use(express.json());
@@ -39,12 +59,10 @@ async function bootstrap() {
     'http://localhost:3001',
     'http://localhost:3000',
     'https://kiichpam-api-jpuw6.ondigitalocean.app',
-    // 'https://tudominio.com',
   ];
 
   app.enableCors({
     origin: (origin, callback) => {
-      // Permite Postman, curl, Stripe, server-to-server, etc.
       if (!origin) return callback(null, true);
 
       if (allowedOrigins.includes(origin)) {

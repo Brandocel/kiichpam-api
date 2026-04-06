@@ -1,4 +1,3 @@
-// src/modules/media/media.service.ts
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { join } from 'path';
@@ -21,13 +20,13 @@ export class MediaService {
         size: f.size,
         originalName: f.originalname,
         filename: f.filename,
-        path: f.path.replace(/\\/g, '/'),
+        path: `uploads/${f.filename}`,
         url: `/uploads/${f.filename}`,
       })),
     });
 
-    // createMany no regresa registros, así que listamos por filename:
     const filenames = files.map((f) => f.filename);
+
     const assets = await this.prisma.mediaAsset.findMany({
       where: { filename: { in: filenames } },
       orderBy: { createdAt: 'desc' },
@@ -65,37 +64,18 @@ export class MediaService {
     });
   }
 
-  /**
-   * ✅ Eliminar media:
-   * - borra el archivo físico en /uploads (si existe)
-   * - borra el registro en BD
-   */
   async remove(id: string) {
     const asset = await this.prisma.mediaAsset.findUnique({ where: { id } });
     if (!asset) throw new NotFoundException('Media no encontrada');
 
-    // ⚠️ Si tienes tablas relacionadas (ej. HeroCarouselSlide) sin cascade,
-    // descomenta esto (y ajusta el nombre del modelo si difiere):
-    //
-    // await this.prisma.heroCarouselSlide.deleteMany({
-    //   where: { mediaId: id },
-    // });
-
-    // 1) Eliminar archivo físico
-    // asset.path trae algo como: "uploads/....webp"
-    const normalizedPath = asset.path.replace(/\\/g, '/');
-
-    // Si ya viene con "uploads/...", esto lo convierte a ruta absoluta correcta:
-    const absFilePath = join(process.cwd(), normalizedPath);
+    const absFilePath = join(process.cwd(), asset.path);
 
     try {
       await fs.unlink(absFilePath);
     } catch (e: any) {
-      // Si no existe el archivo, no fallamos
       if (e?.code !== 'ENOENT') throw e;
     }
 
-    // 2) Eliminar registro en BD
     await this.prisma.mediaAsset.delete({ where: { id } });
 
     return { deleted: true, id };
