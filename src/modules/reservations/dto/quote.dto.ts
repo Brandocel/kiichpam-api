@@ -8,7 +8,6 @@ import {
   IsInt,
   IsOptional,
   IsString,
-  Max,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -61,7 +60,7 @@ export class QuoteDto {
   @IsString()
   couponCode?: string;
 
-  @ApiPropertyOptional({ example: 'FB-ENERO' })
+  @ApiPropertyOptional({ example: 'SS-KX-2026' })
   @IsOptional()
   @IsString()
   campaignCode?: string;
@@ -113,3 +112,10 @@ export class QuoteDto {
   @Type(() => SelectedExtraDto)
   extras?: SelectedExtraDto[];
 }
+
+export type NormalizedQuoteDto = QuoteDto & {
+  normalizedPackageCode?: string;
+  normalizedCampaignCode?: string;
+  normalizedCouponCode?: string;
+  normalizedLang?: 'es' | 'en';
+};

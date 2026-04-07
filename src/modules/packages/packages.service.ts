@@ -4,21 +4,23 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CampaignsService } from '../campaigns/campaigns.service';
 import { CreatePackageDto } from './dto/create-package.dto';
 import { UpdatePackageDto } from './dto/update-package.dto';
 
 @Injectable()
 export class PackagesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly campaignsService: CampaignsService,
+  ) {}
 
-  // helper: arma el objeto final
   private mapPackage(p: any) {
     return {
       id: p.id,
       code: p.code,
       isActive: p.isActive,
 
-      // ✅ NUEVO
       image: p.coverMedia
         ? {
             id: p.coverMedia.id,
@@ -46,18 +48,72 @@ export class PackagesService {
         priceMXN: e.priceMXN,
         currency: e.currency,
         isRequired: e.isRequired,
+        isActive: e.isActive,
         translation: e.translations?.[0] ?? null,
       })),
     };
+  }
+
+  private parseResolvedOptions(options?: {
+    lang?: string;
+    adults?: number;
+    children?: number;
+    infants?: number;
+    quoteAt?: string;
+    withCampaign?: boolean;
+  }) {
+    return {
+      lang: options?.lang ?? 'es',
+      adults: Number(options?.adults ?? 0),
+      children: Number(options?.children ?? 0),
+      infants: Number(options?.infants ?? 0),
+      quoteAt: options?.quoteAt,
+      withCampaign: options?.withCampaign ?? false,
+    };
+  }
+
+  private async getBasePackageByCode(code: string, lang = 'es') {
+    const p = await this.prisma.package.findUnique({
+      where: { code },
+      include: {
+        coverMedia: {
+          select: { id: true, url: true, mimeType: true },
+        },
+        translations: {
+          where: { lang },
+          select: {
+            lang: true,
+            name: true,
+            description: true,
+            includes: true,
+            excludes: true,
+            notes: true,
+          },
+        },
+        extras: {
+          where: { isActive: true },
+          include: {
+            translations: {
+              where: { lang },
+              select: { lang: true, name: true, description: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!p || !p.isActive) {
+      throw new NotFoundException('Package not found');
+    }
+
+    return p;
   }
 
   async findAll(lang = 'es') {
     const packages = await this.prisma.package.findMany({
       where: { isActive: true },
       include: {
-        // ✅ NUEVO
         coverMedia: { select: { id: true, url: true, mimeType: true } },
-
         translations: {
           where: { lang },
           select: {
@@ -85,13 +141,21 @@ export class PackagesService {
     return packages.map((p) => this.mapPackage(p));
   }
 
-  async findByCode(code: string, lang = 'es') {
-    const p = await this.prisma.package.findUnique({
-      where: { code },
-      include: {
-        // ✅ NUEVO
-        coverMedia: { select: { id: true, url: true, mimeType: true } },
+  async findAllResolved(options?: {
+    lang?: string;
+    adults?: number;
+    children?: number;
+    infants?: number;
+    quoteAt?: string;
+    withCampaign?: boolean;
+  }) {
+    const { lang, adults, children, infants, quoteAt, withCampaign } =
+      this.parseResolvedOptions(options);
 
+    const packages = await this.prisma.package.findMany({
+      where: { isActive: true },
+      include: {
+        coverMedia: { select: { id: true, url: true, mimeType: true } },
         translations: {
           where: { lang },
           select: {
@@ -113,21 +177,116 @@ export class PackagesService {
           },
         },
       },
+      orderBy: { createdAt: 'desc' },
     });
 
-    if (!p || !p.isActive) throw new NotFoundException('Package not found');
+    const baseItems = packages.map((p) => this.mapPackage(p));
+
+    if (!withCampaign) {
+      return {
+        success: true,
+        data: baseItems,
+      };
+    }
+
+    const resolvedItems = await Promise.all(
+      baseItems.map(async (pkg) => {
+        try {
+          const quote = await this.campaignsService.quote({
+            packageCode: pkg.code,
+            adults,
+            children,
+            infants,
+            lang,
+            quoteAt,
+          } as any);
+
+          return {
+            ...pkg,
+            campaignApplied: (quote?.data?.appliedCampaigns?.length ?? 0) > 0,
+            appliedCampaigns: quote?.data?.appliedCampaigns ?? [],
+            effectivePackage: quote?.data?.effectivePackage ?? null,
+            pricing: quote?.data?.pricing ?? null,
+          };
+        } catch {
+          return {
+            ...pkg,
+            campaignApplied: false,
+            appliedCampaigns: [],
+            effectivePackage: null,
+            pricing: null,
+          };
+        }
+      }),
+    );
+
+    return {
+      success: true,
+      data: resolvedItems,
+    };
+  }
+
+  async findByCode(code: string, lang = 'es') {
+    const p = await this.getBasePackageByCode(code, lang);
     return this.mapPackage(p);
   }
 
-  // =========================
-  // ✅ SET COVER IMAGE
-  // =========================
+  async findByCodeResolved(
+    code: string,
+    options?: {
+      lang?: string;
+      adults?: number;
+      children?: number;
+      infants?: number;
+      quoteAt?: string;
+      withCampaign?: boolean;
+    },
+  ) {
+    const { lang, adults, children, infants, quoteAt, withCampaign } =
+      this.parseResolvedOptions(options);
+
+    const basePackage = await this.getBasePackageByCode(code, lang);
+    const mappedBase = this.mapPackage(basePackage);
+
+    if (!withCampaign) {
+      return {
+        success: true,
+        data: mappedBase,
+      };
+    }
+
+    const quote = await this.campaignsService.quote({
+      packageCode: code,
+      adults,
+      children,
+      infants,
+      lang,
+      quoteAt,
+    } as any);
+
+    return {
+      success: true,
+      data: {
+        ...mappedBase,
+        campaignApplied: (quote?.data?.appliedCampaigns?.length ?? 0) > 0,
+        appliedCampaigns: quote?.data?.appliedCampaigns ?? [],
+        effectivePackage: quote?.data?.effectivePackage ?? null,
+        pricing: quote?.data?.pricing ?? null,
+      },
+    };
+  }
+
   async setCoverImage(code: string, mediaId: string) {
     const pkg = await this.prisma.package.findUnique({ where: { code } });
     if (!pkg) throw new NotFoundException('Package not found');
 
-    const media = await this.prisma.mediaAsset.findUnique({ where: { id: mediaId } });
-    if (!media || !media.isActive) throw new NotFoundException('Media not found');
+    const media = await this.prisma.mediaAsset.findUnique({
+      where: { id: mediaId },
+    });
+
+    if (!media || !media.isActive) {
+      throw new NotFoundException('Media not found');
+    }
 
     if (media.kind !== 'IMAGE') {
       throw new BadRequestException('Media must be IMAGE');
@@ -138,8 +297,26 @@ export class PackagesService {
       data: { coverMediaId: mediaId },
       include: {
         coverMedia: { select: { id: true, url: true, mimeType: true } },
-        translations: { where: { lang: 'es' }, select: { lang: true, name: true, description: true, includes: true, excludes: true, notes: true } },
-        extras: { where: { isActive: true }, include: { translations: { where: { lang: 'es' }, select: { lang: true, name: true, description: true } } } },
+        translations: {
+          where: { lang: 'es' },
+          select: {
+            lang: true,
+            name: true,
+            description: true,
+            includes: true,
+            excludes: true,
+            notes: true,
+          },
+        },
+        extras: {
+          where: { isActive: true },
+          include: {
+            translations: {
+              where: { lang: 'es' },
+              select: { lang: true, name: true, description: true },
+            },
+          },
+        },
       },
     });
 
@@ -150,9 +327,6 @@ export class PackagesService {
     };
   }
 
-  // =========================
-  // ✅ REMOVE COVER IMAGE
-  // =========================
   async removeCoverImage(code: string) {
     const pkg = await this.prisma.package.findUnique({ where: { code } });
     if (!pkg) throw new NotFoundException('Package not found');
@@ -169,9 +343,6 @@ export class PackagesService {
     };
   }
 
-  // =========================
-  // ✅ UPDATE PACKAGE (opcional)
-  // =========================
   async updateByCode(code: string, dto: UpdatePackageDto) {
     const pkg = await this.prisma.package.findUnique({ where: { code } });
     if (!pkg) throw new NotFoundException('Package not found');
@@ -180,19 +351,45 @@ export class PackagesService {
       where: { code },
       data: {
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
-        ...(dto.adultPriceMXN !== undefined ? { adultPriceMXN: dto.adultPriceMXN } : {}),
-        ...(dto.childPriceMXN !== undefined ? { childPriceMXN: dto.childPriceMXN } : {}),
-        ...(dto.infantPriceMXN !== undefined ? { infantPriceMXN: dto.infantPriceMXN } : {}),
+        ...(dto.adultPriceMXN !== undefined
+          ? { adultPriceMXN: dto.adultPriceMXN }
+          : {}),
+        ...(dto.childPriceMXN !== undefined
+          ? { childPriceMXN: dto.childPriceMXN }
+          : {}),
+        ...(dto.infantPriceMXN !== undefined
+          ? { infantPriceMXN: dto.infantPriceMXN }
+          : {}),
         ...(dto.currency !== undefined ? { currency: dto.currency } : {}),
         ...(dto.maxAdults !== undefined ? { maxAdults: dto.maxAdults } : {}),
-        ...(dto.maxChildren !== undefined ? { maxChildren: dto.maxChildren } : {}),
+        ...(dto.maxChildren !== undefined
+          ? { maxChildren: dto.maxChildren }
+          : {}),
         ...(dto.maxInfants !== undefined ? { maxInfants: dto.maxInfants } : {}),
         ...(dto.ageRules !== undefined ? { ageRules: dto.ageRules as any } : {}),
       },
       include: {
         coverMedia: { select: { id: true, url: true, mimeType: true } },
-        translations: { where: { lang: 'es' }, select: { lang: true, name: true, description: true, includes: true, excludes: true, notes: true } },
-        extras: { where: { isActive: true }, include: { translations: { where: { lang: 'es' }, select: { lang: true, name: true, description: true } } } },
+        translations: {
+          where: { lang: 'es' },
+          select: {
+            lang: true,
+            name: true,
+            description: true,
+            includes: true,
+            excludes: true,
+            notes: true,
+          },
+        },
+        extras: {
+          where: { isActive: true },
+          include: {
+            translations: {
+              where: { lang: 'es' },
+              select: { lang: true, name: true, description: true },
+            },
+          },
+        },
       },
     });
 
@@ -203,9 +400,6 @@ export class PackagesService {
     };
   }
 
-  // =========================
-  // ✅ SOFT DELETE (opcional)
-  // =========================
   async softDeleteByCode(code: string) {
     const pkg = await this.prisma.package.findUnique({ where: { code } });
     if (!pkg) throw new NotFoundException('Package not found');
@@ -215,11 +409,13 @@ export class PackagesService {
       data: { isActive: false, coverMediaId: null },
     });
 
-    return { success: true, message: 'Package disabled' };
+    return {
+      success: true,
+      message: 'Package disabled',
+    };
   }
 
   async create(dto: CreatePackageDto) {
-    // evitar duplicar idiomas
     if (dto.translations?.length) {
       const langs = dto.translations.map((t) => t.lang);
       if (new Set(langs).size !== langs.length) {
@@ -227,7 +423,6 @@ export class PackagesService {
       }
     }
 
-    // evitar duplicar extras por code
     if (dto.extras?.length) {
       const codes = dto.extras.map((e) => e.code);
       if (new Set(codes).size !== codes.length) {
@@ -278,12 +473,13 @@ export class PackagesService {
                 priceMXN: e.priceMXN,
                 currency: e.currency ?? 'MXN',
                 isRequired: e.isRequired ?? false,
+                isActive: e.isActive ?? true,
                 translations: e.translations?.length
                   ? {
-                      create: e.translations.map((tr) => ({
-                        lang: tr.lang,
-                        name: tr.name,
-                        description: tr.description ?? null,
+                      create: e.translations.map((t) => ({
+                        lang: t.lang,
+                        name: t.name,
+                        description: t.description ?? null,
                       })),
                     }
                   : undefined,
@@ -293,8 +489,26 @@ export class PackagesService {
       },
       include: {
         coverMedia: { select: { id: true, url: true, mimeType: true } },
-        translations: { where: { lang: 'es' }, select: { lang: true, name: true, description: true, includes: true, excludes: true, notes: true } },
-        extras: { include: { translations: true } },
+        translations: {
+          where: { lang: 'es' },
+          select: {
+            lang: true,
+            name: true,
+            description: true,
+            includes: true,
+            excludes: true,
+            notes: true,
+          },
+        },
+        extras: {
+          where: { isActive: true },
+          include: {
+            translations: {
+              where: { lang: 'es' },
+              select: { lang: true, name: true, description: true },
+            },
+          },
+        },
       },
     });
 

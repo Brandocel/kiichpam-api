@@ -115,8 +115,14 @@ class CreateExtraDto {
   @IsBoolean()
   isRequired?: boolean;
 
+  @ApiPropertyOptional({ example: true })
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
+
   @ApiPropertyOptional({ type: [ExtraTranslationDto] })
   @IsOptional()
+  @IsArray()
   @ValidateNested({ each: true })
   @Type(() => ExtraTranslationDto)
   translations?: ExtraTranslationDto[];
@@ -174,19 +180,21 @@ export class CreatePackageDto {
 
   @ApiPropertyOptional({ type: AgeRulesDto })
   @IsOptional()
-  @IsObject()
+  @ValidateNested()
+  @Type(() => AgeRulesDto)
   ageRules?: AgeRulesDto;
 
   @ApiPropertyOptional({ type: [PackageTranslationDto] })
   @IsOptional()
+  @IsArray()
   @ValidateNested({ each: true })
   @Type(() => PackageTranslationDto)
   translations?: PackageTranslationDto[];
 
   @ApiPropertyOptional({ type: [CreateExtraDto] })
   @IsOptional()
+  @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CreateExtraDto)
   extras?: CreateExtraDto[];
 }
-

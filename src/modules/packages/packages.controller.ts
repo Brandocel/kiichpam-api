@@ -21,14 +21,59 @@ export class PackagesController {
 
   @Get()
   @ApiQuery({ name: 'lang', required: false, example: 'es' })
-  findAll(@Query('lang') lang?: string) {
-    return this.service.findAll(lang ?? 'es');
+  @ApiQuery({ name: 'adults', required: false, example: 2 })
+  @ApiQuery({ name: 'children', required: false, example: 0 })
+  @ApiQuery({ name: 'infants', required: false, example: 0 })
+  @ApiQuery({ name: 'quoteAt', required: false, example: '2026-04-07T12:00:00.000Z' })
+  @ApiQuery({ name: 'withCampaign', required: false, example: true })
+  findAll(
+    @Query('lang') lang?: string,
+    @Query('adults') adults?: string,
+    @Query('children') children?: string,
+    @Query('infants') infants?: string,
+    @Query('quoteAt') quoteAt?: string,
+    @Query('withCampaign') withCampaign?: string,
+  ) {
+    return this.service.findAllResolved({
+      lang: lang ?? 'es',
+      adults: Number(adults ?? 0),
+      children: Number(children ?? 0),
+      infants: Number(infants ?? 0),
+      quoteAt,
+      withCampaign:
+        withCampaign === 'true' ||
+        withCampaign === '1' ||
+        withCampaign === 'yes',
+    });
   }
 
   @Get(':code')
   @ApiQuery({ name: 'lang', required: false, example: 'es' })
-  findOne(@Param('code') code: string, @Query('lang') lang?: string) {
-    return this.service.findByCode(code, lang ?? 'es');
+  @ApiQuery({ name: 'adults', required: false, example: 2 })
+  @ApiQuery({ name: 'children', required: false, example: 0 })
+  @ApiQuery({ name: 'infants', required: false, example: 0 })
+  @ApiQuery({ name: 'quoteAt', required: false, example: '2026-04-07T12:00:00.000Z' })
+  @ApiQuery({ name: 'withCampaign', required: false, example: true })
+  findOne(
+    @Param('code') code: string,
+    @Query('lang') lang?: string,
+    @Query('adults') adults?: string,
+    @Query('children') children?: string,
+    @Query('infants') infants?: string,
+    @Query('quoteAt') quoteAt?: string,
+    @Query('withCampaign') withCampaign?: string,
+  ) {
+    return this.service.findByCodeResolved(code, {
+      lang: lang ?? 'es',
+      adults: Number(adults ?? 0),
+      children: Number(children ?? 0),
+      infants: Number(infants ?? 0),
+      quoteAt,
+      withCampaign:
+        withCampaign === 'true' ||
+        withCampaign === '1' ||
+        withCampaign === 'yes',
+    });
   }
 
   @Post()
@@ -36,10 +81,6 @@ export class PackagesController {
   create(@Body() dto: CreatePackageDto) {
     return this.service.create(dto);
   }
-
-  // =========================
-  // ✅ COVER IMAGE ENDPOINTS
-  // =========================
 
   @Patch(':code/cover')
   @ApiBearerAuth()
@@ -54,9 +95,6 @@ export class PackagesController {
     return this.service.removeCoverImage(code);
   }
 
-  // =========================
-  // ✅ UPDATE PACKAGE (opcional)
-  // =========================
   @Patch(':code')
   @ApiBearerAuth()
   @ApiBody({ type: UpdatePackageDto })
@@ -64,9 +102,6 @@ export class PackagesController {
     return this.service.updateByCode(code, dto);
   }
 
-  // =========================
-  // ✅ DELETE (SOFT) PACKAGE (opcional)
-  // =========================
   @Delete(':code')
   @ApiBearerAuth()
   softDelete(@Param('code') code: string) {

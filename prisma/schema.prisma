@@ -29,6 +29,39 @@ enum MediaKind {
   VIDEO
 }
 
+enum CampaignStatus {
+  SCHEDULED
+  ACTIVE
+  EXPIRED
+  DISABLED
+}
+
+enum CampaignRuleType {
+  BASE_PRICE
+  FIXED_PRICE
+  PERCENT_DISCOUNT
+  TWO_FOR_ONE
+  THREE_FOR_TWO
+}
+
+enum CampaignAudience {
+  ADULT
+  CHILD
+  INFANT
+  ALL
+}
+
+enum CampaignCategory {
+  PRICE
+  CONTENT
+  MIXED
+}
+
+enum CampaignEffectMode {
+  MERGE
+  REPLACE
+}
+
 model User {
   id        String   @id @default(uuid())
   email     String   @unique
@@ -68,11 +101,6 @@ model Package {
   updatedAt DateTime @updatedAt
 }
 
-/**
- * PACKAGE TRANSLATION
- * - name / description en ES/EN
- * - includes/excludes/notes como lista (Json array)
- */
 model PackageTranslation {
   id          String  @id @default(uuid())
   packageId   String
@@ -89,9 +117,6 @@ model PackageTranslation {
   @@unique([packageId, lang])
 }
 
-/**
- * EXTRAS DEL PAQUETE (buffet, bebidas, etc)
- */
 model PackageExtra {
   id         String  @id @default(uuid())
   packageId  String
@@ -107,9 +132,6 @@ model PackageExtra {
   @@unique([packageId, code])
 }
 
-/**
- * EXTRA TRANSLATION (ES/EN)
- */
 model PackageExtraTranslation {
   id          String  @id @default(uuid())
   extraId     String
@@ -132,22 +154,77 @@ model Campaign {
   packageId String?
   package   Package? @relation(fields: [packageId], references: [id], onDelete: SetNull)
 
-  coupons Coupon[]
+  description String?
+
+  status   CampaignStatus   @default(SCHEDULED)
+  category CampaignCategory @default(PRICE)
+  ruleType CampaignRuleType @default(BASE_PRICE)
+  audience CampaignAudience @default(ALL)
+
+  startAt DateTime?
+  endAt   DateTime?
+
+  priority  Int     @default(0)
+  autoApply Boolean @default(true)
+  stackable Boolean @default(false)
+
+  fixedAdultPriceMXN  Int?
+  fixedChildPriceMXN  Int?
+  fixedInfantPriceMXN Int?
+
+  discountPercent Int?
+
+  payQty  Int?
+  takeQty Int?
+
+  minAdults   Int?
+  minChildren Int?
+  minInfants  Int?
+
+  maxUses   Int?
+  usedCount Int  @default(0)
+
+  translations CampaignTranslation[]
+  coupons      Coupon[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([packageId])
+  @@index([isActive])
+  @@index([status])
+  @@index([startAt])
+  @@index([endAt])
+  @@index([packageId, status, startAt, endAt])
 }
 
-/**
- * RESERVATION
- * - Guarda el paquete elegido
- * - Guarda tracking
- * - Guarda cupón
- * - Guarda totals
- * - Guarda snapshot de lo vendido
- * - Guarda extras seleccionados
- * - Guarda trazabilidad del folio
- */
+model CampaignTranslation {
+  id         String @id @default(uuid())
+  campaignId String
+  lang       String
+
+  promoName        String?
+  promoDescription String?
+
+  addIncludes    Json?
+  removeIncludes Json?
+
+  addExcludes    Json?
+  removeExcludes Json?
+
+  addNotes    Json?
+  removeNotes Json?
+
+  imageMediaId String?
+  imageMedia   MediaAsset? @relation("CampaignCover", fields: [imageMediaId], references: [id], onDelete: SetNull)
+
+  effectMode CampaignEffectMode @default(MERGE)
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, lang])
+}
+
 model Reservation {
   id    String @id @default(uuid())
   folio String @unique
@@ -167,14 +244,15 @@ model Reservation {
   country   String?
   comments  String?
 
-  campaignCode String?
-  utmSource    String?
-  utmMedium    String?
-  utmCampaign  String?
-  utmContent   String?
-  utmTerm      String?
-  fbclid       String?
-  ttclid       String?
+  campaignCode         String?
+  appliedCampaignCodes Json?
+  utmSource            String?
+  utmMedium            String?
+  utmCampaign          String?
+  utmContent           String?
+  utmTerm              String?
+  fbclid               String?
+  ttclid               String?
 
   couponCode        String?
   couponDiscountMXN Int     @default(0)
@@ -182,14 +260,18 @@ model Reservation {
   inapamVisitors    Int @default(0)
   inapamDiscountMXN Int @default(0)
 
-  discountMXN Int @default(0)
+  campaignDiscountMXN Int @default(0)
+  discountMXN         Int @default(0)
 
-  subtotalMXN Int @default(0)
-  extrasMXN   Int @default(0)
-  totalMXN    Int @default(0)
+  peopleSubtotalMXN Int @default(0)
+  subtotalMXN       Int @default(0)
+  extrasMXN         Int @default(0)
+  totalMXN          Int @default(0)
 
   currency String @default("MXN")
   status   String @default("DRAFT")
+
+  pricingBreakdown Json?
 
   snapshotLang        String?
   snapshotName        String?
@@ -212,13 +294,6 @@ model Reservation {
   @@index([createdAt])
 }
 
-/**
- * Tabla para llevar el consecutivo diario del folio
- * Ejemplo:
- * dateKey = 20260312
- * lastValue = 25
- * siguiente folio = KXN-20260312-0026
- */
 model ReservationFolioSequence {
   id        String @id @default(uuid())
   dateKey   String @unique
@@ -230,9 +305,6 @@ model ReservationFolioSequence {
   @@map("reservation_folio_sequences")
 }
 
-/**
- * Breadcrumb / trazabilidad del folio
- */
 model ReservationTrace {
   id            String  @id @default(uuid())
   reservationId String
@@ -251,10 +323,6 @@ model ReservationTrace {
   @@map("reservation_traces")
 }
 
-/**
- * Extras seleccionados en la reservación
- * - Guarda precio unitario y nombre (snapshot)
- */
 model ReservationExtra {
   id            String  @id @default(uuid())
   reservationId String
@@ -325,47 +393,41 @@ model Coupon {
 }
 
 model MediaAsset {
-  id       String    @id @default(uuid())
-  kind     MediaKind
-  mimeType String
-  ext      String
-  size     Int
-
+  id           String    @id @default(uuid())
+  kind         MediaKind
+  mimeType     String
+  ext          String
+  size         Int
   originalName String
-  filename     String
-  path         String
+  filename     String?   @unique
+  path         String?
   url          String
+  isActive     Boolean   @default(true)
 
-  width    Int?
-  height   Int?
-  duration Int?
-
-  isActive Boolean @default(true)
+  packageCoverOf     Package[]             @relation("PackageCover")
+  campaignCoverOf    CampaignTranslation[] @relation("CampaignCover")
+  heroCarouselSlides HeroCarouselSlide[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
-  heroSlides    HeroCarouselSlide[]
-  packageCovers Package[]           @relation("PackageCover")
 }
 
 model HeroCarouselSlide {
-  id       String  @id @default(uuid())
-  order    Int     @default(0)
-  isActive Boolean @default(true)
-
-  title    String?
-  subtitle String?
-  linkUrl  String?
-  linkText String?
-  altText  String?
-
-  mediaId String
-  media   MediaAsset @relation(fields: [mediaId], references: [id], onDelete: Cascade)
-
+  id        String   @id @default(uuid())
+  mediaId   String
+  order     Int      @default(0)
+  isActive  Boolean  @default(true)
+  title     String?
+  subtitle  String?
+  linkUrl   String?
+  linkText  String?
+  altText   String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  media MediaAsset @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
   @@index([order])
   @@index([isActive])
+  @@map("hero_carousel_slides")
 }

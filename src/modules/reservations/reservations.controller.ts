@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { ReservationsService } from './reservations.service';
 import { QuoteDto } from './dto/quote.dto';
+import { UpdateReservationContactDto } from './dto/update-reservation-contact.dto';
 
 @ApiTags('Reservations')
 @Controller('reservations')
@@ -24,7 +25,10 @@ export class ReservationsController {
   }
 
   @Patch(':folio/contact')
-  updateContact(@Param('folio') folio: string, @Body() body: any) {
+  updateContact(
+    @Param('folio') folio: string,
+    @Body() body: UpdateReservationContactDto,
+  ) {
     return this.service.updateContact(folio, body);
   }
 }

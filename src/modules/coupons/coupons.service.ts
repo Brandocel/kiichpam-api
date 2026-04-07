@@ -41,9 +41,6 @@ export class CouponsService {
       packageId = pkg.id;
     }
 
-    // Opción B:
-    // Si mandan campaignCode y no existe, NO truena.
-    // Solo conectamos campaignId si sí existe.
     if (dto.campaignCode) {
       const normalizedCampaignCode = dto.campaignCode.trim().toUpperCase();
 
@@ -74,7 +71,9 @@ export class CouponsService {
     }
 
     if (dto.scope === 'PACKAGE_ONLY' && !packageId) {
-      throw new BadRequestException('PACKAGE_ONLY coupon requires a valid packageCode');
+      throw new BadRequestException(
+        'PACKAGE_ONLY coupon requires a valid packageCode',
+      );
     }
 
     if (dto.scope === 'CAMPAIGN_ONLY' && !campaignId) {
@@ -182,9 +181,6 @@ export class CouponsService {
       packageId = pkg.id;
     }
 
-    // Opción B:
-    // Si mandan campaignCode y no existe, NO falla.
-    // Solo guardamos el campaignId si sí existe.
     if (params.campaignCode) {
       const normalizedCampaignCode = params.campaignCode.trim().toUpperCase();
 
@@ -212,7 +208,6 @@ export class CouponsService {
         throw new BadRequestException('Coupon campaign configuration invalid');
       }
 
-      // Aquí sí exigimos campaña válida y que coincida
       if (!campaignId || coupon.campaignId !== campaignId) {
         throw new BadRequestException('Coupon not valid for this campaign');
       }
