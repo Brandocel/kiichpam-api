@@ -399,8 +399,8 @@ model MediaAsset {
   ext          String
   size         Int
   originalName String
-  filename     String?   @unique
-  path         String?
+  filename     String   @unique
+  path         String
   url          String
   isActive     Boolean   @default(true)
 
