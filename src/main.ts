@@ -14,21 +14,21 @@ async function bootstrap() {
 
   const uploadsPath = join(process.cwd(), 'uploads');
 
-  // asegurar que exista la carpeta uploads
+  // Crear carpeta uploads si no existe
   if (!existsSync(uploadsPath)) {
     mkdirSync(uploadsPath, { recursive: true });
   }
 
   /**
    * =========================================================
-   * Stripe Webhook
+   * Stripe Webhook (raw body)
    * =========================================================
    */
   app.use('/payments/webhook', express.raw({ type: 'application/json' }));
 
   /**
    * =========================================================
-   * Static uploads
+   * Static files (uploads)
    * =========================================================
    */
   app.use(
@@ -44,7 +44,7 @@ async function bootstrap() {
 
   /**
    * =========================================================
-   * Parsers normales
+   * Body parsers
    * =========================================================
    */
   app.use(express.json());
@@ -58,17 +58,14 @@ async function bootstrap() {
   const allowedOrigins = [
     'http://localhost:3001',
     'http://localhost:3000',
-    'https://kiichpam-api-jpuw6.ondigitalocean.app',
+    'https://kiichpam-api-jpuw6.ondigitalocean.app',   // actualiza si cambia el dominio
   ];
 
   app.enableCors({
     origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
-
-      if (allowedOrigins.includes(origin)) {
+      if (!origin || allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
-
       return callback(new Error(`CORS blocked for origin: ${origin}`), false);
     },
     credentials: true,
@@ -78,19 +75,7 @@ async function bootstrap() {
 
   /**
    * =========================================================
-   * Preflight OPTIONS
-   * =========================================================
-   */
-  app.use((req, res, next) => {
-    if (req.method === 'OPTIONS') {
-      return res.sendStatus(204);
-    }
-    next();
-  });
-
-  /**
-   * =========================================================
-   * Pipes globales
+   * Global Pipes, Interceptors y Filters
    * =========================================================
    */
   app.useGlobalPipes(
@@ -101,11 +86,6 @@ async function bootstrap() {
     }),
   );
 
-  /**
-   * =========================================================
-   * Interceptors / Filters
-   * =========================================================
-   */
   app.useGlobalInterceptors(new ResponseInterceptor());
   app.useGlobalFilters(new HttpExceptionFilter());
 
@@ -126,10 +106,15 @@ async function bootstrap() {
 
   /**
    * =========================================================
-   * Start server
+   * START SERVER - ¡ESTO ES LO MÁS IMPORTANTE!
    * =========================================================
    */
-  await app.listen(process.env.PORT ?? 3000);
+  const port = Number(process.env.PORT) || 3000;
+
+  await app.listen(port, '0.0.0.0');
+
+  console.log(`🚀 Application is running on: http://0.0.0.0:${port}`);
+  console.log(`📚 Swagger available at: http://0.0.0.0:${port}/docs`);
 }
 
 bootstrap();
