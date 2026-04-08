@@ -8,18 +8,20 @@
     "experimentalDecorators": true,
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
-    "target": "ES2022",
+    "target": "ES2021",
     "sourceMap": true,
     "outDir": "./dist",
+    "rootDir": "./src",
     "baseUrl": "./",
-    "incremental": true,
+    "resolveJsonModule": true,
+    "incremental": false,
     "skipLibCheck": true,
-    "strictNullChecks": true,
-    "forceConsistentCasingInFileNames": true,
+    "strict": false,
     "noImplicitAny": false,
-    "strictBindCallApply": false,
+    "strictNullChecks": false,
+    "forceConsistentCasingInFileNames": false,
     "noFallthroughCasesInSwitch": false
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "test"]
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "test", "**/*.spec.ts"]
 }

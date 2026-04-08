@@ -14,23 +14,12 @@ async function bootstrap() {
 
   const uploadsPath = join(process.cwd(), 'uploads');
 
-  // Crear carpeta uploads si no existe
   if (!existsSync(uploadsPath)) {
     mkdirSync(uploadsPath, { recursive: true });
   }
 
-  /**
-   * =========================================================
-   * Stripe Webhook (raw body)
-   * =========================================================
-   */
   app.use('/payments/webhook', express.raw({ type: 'application/json' }));
 
-  /**
-   * =========================================================
-   * Static files (uploads)
-   * =========================================================
-   */
   app.use(
     '/uploads',
     express.static(uploadsPath, {
@@ -42,24 +31,15 @@ async function bootstrap() {
     }),
   );
 
-  /**
-   * =========================================================
-   * Body parsers
-   * =========================================================
-   */
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
-  /**
-   * =========================================================
-   * CORS
-   * =========================================================
-   */
   const allowedOrigins = [
-    'http://localhost:3001',
+    'http://127.0.0.1:3000',
     'http://localhost:3000',
+    'http://127.0.0.1:5173',
+    'http://localhost:5173',
     'https://kiichpam-api-jpuw6.ondigitalocean.app',
-    // Agrega aquí más dominios si los necesitas en el futuro
   ];
 
   app.enableCors({
@@ -67,6 +47,7 @@ async function bootstrap() {
       if (!origin || allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
+
       return callback(new Error(`CORS blocked for origin: ${origin}`), false);
     },
     credentials: true,
@@ -74,11 +55,6 @@ async function bootstrap() {
     allowedHeaders: ['Content-Type', 'Authorization', 'Stripe-Signature'],
   });
 
-  /**
-   * =========================================================
-   * Global Pipes, Interceptors y Filters
-   * =========================================================
-   */
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -90,13 +66,8 @@ async function bootstrap() {
   app.useGlobalInterceptors(new ResponseInterceptor());
   app.useGlobalFilters(new HttpExceptionFilter());
 
-  /**
-   * =========================================================
-   * Swagger
-   * =========================================================
-   */
   const config = new DocumentBuilder()
-    .setTitle('Kichpam API')
+    .setTitle('Kiichpam API')
     .setDescription('API de reservaciones de paquetes')
     .setVersion('1.0.0')
     .addBearerAuth()
@@ -105,12 +76,7 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('docs', app, document);
 
-  /**
-   * =========================================================
-   * START SERVER - CONFIGURACIÓN PARA DIGITALOCEAN
-   * =========================================================
-   */
-  const port = Number(process.env.PORT) || 8080;   // ← Cambiado a 8080 por defecto
+  const port = Number(process.env.PORT) || 8080;
 
   await app.listen(port, '0.0.0.0');
 
