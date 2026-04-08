@@ -58,7 +58,8 @@ async function bootstrap() {
   const allowedOrigins = [
     'http://localhost:3001',
     'http://localhost:3000',
-    'https://kiichpam-api-jpuw6.ondigitalocean.app',   // actualiza si cambia el dominio
+    'https://kiichpam-api-jpuw6.ondigitalocean.app',
+    // Agrega aquí más dominios si los necesitas en el futuro
   ];
 
   app.enableCors({
@@ -106,14 +107,14 @@ async function bootstrap() {
 
   /**
    * =========================================================
-   * START SERVER - ¡ESTO ES LO MÁS IMPORTANTE!
+   * START SERVER - CONFIGURACIÓN PARA DIGITALOCEAN
    * =========================================================
    */
-  const port = Number(process.env.PORT) || 3000;
+  const port = Number(process.env.PORT) || 8080;   // ← Cambiado a 8080 por defecto
 
   await app.listen(port, '0.0.0.0');
 
-  console.log(`🚀 Application is running on: http://0.0.0.0:${port}`);
+  console.log(`🚀 Application is running on port ${port}`);
   console.log(`📚 Swagger available at: http://0.0.0.0:${port}/docs`);
 }
 
