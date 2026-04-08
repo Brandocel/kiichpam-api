@@ -22,6 +22,7 @@ import { diskStorage } from 'multer';
 import { extname, join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import { MediaService } from './media.service';
+import { Express } from 'express';   // ← Importante agregar esto
 
 function sanitizeBaseName(originalName: string) {
   const cleaned = (originalName || 'file')

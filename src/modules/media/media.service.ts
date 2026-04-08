@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { join } from 'path';
 import { promises as fs } from 'fs';
 import { MediaKind } from '@prisma/client';
+import { Express } from 'express';   // ← Agregado
 
 @Injectable()
 export class MediaService {
@@ -149,6 +150,7 @@ export class MediaService {
     if (!asset.path) {
       throw new NotFoundException('El archivo no tiene una ruta válida');
     }
+
     const absFilePath = join(process.cwd(), asset.path);
 
     try {
