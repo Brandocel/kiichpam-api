@@ -9,4 +9,24 @@ export class AppController {
   getHello(): string {
     return this.appService.getHello();
   }
+
+  @Get('ping')
+  getPing() {
+    return {
+      ok: true,
+      message: 'pong',
+      service: 'kiichpam-api',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Get('health')
+  getHealth() {
+    return {
+      ok: true,
+      service: 'kiichpam-api',
+      status: 'running',
+      timestamp: new Date().toISOString(),
+    };
+  }
 }

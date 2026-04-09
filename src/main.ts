@@ -77,11 +77,42 @@ async function bootstrap() {
   SwaggerModule.setup('docs', app, document);
 
   const port = Number(process.env.PORT) || 8080;
+  const publicUrl =
+    process.env.APP_URL || `http://localhost:${port}`;
 
   await app.listen(port, '0.0.0.0');
 
   console.log(`🚀 Application is running on port ${port}`);
-  console.log(`📚 Swagger available at: http://0.0.0.0:${port}/docs`);
+  console.log(`📚 Swagger available at: ${publicUrl}/docs`);
+  console.log(`❤️ Health available at: ${publicUrl}/health`);
+  console.log(`📡 Ping available at: ${publicUrl}/ping`);
+
+  const enableSelfPing = process.env.ENABLE_SELF_PING === 'true';
+  const selfPingMinutes = Number(process.env.SELF_PING_INTERVAL_MINUTES || 15);
+
+  if (enableSelfPing) {
+    const intervalMs = selfPingMinutes * 60 * 1000;
+
+    setInterval(async () => {
+      try {
+        const response = await fetch(`${publicUrl}/ping`, {
+          method: 'GET',
+        });
+
+        console.log(
+          `📡 SELF_PING ${new Date().toISOString()} -> ${publicUrl}/ping [${response.status}]`,
+        );
+      } catch (error) {
+        console.error('❌ SELF_PING error');
+
+        if (error instanceof Error) {
+          console.error(error.message);
+        }
+      }
+    }, intervalMs);
+
+    console.log(`⏱️ Self ping enabled every ${selfPingMinutes} minutes`);
+  }
 }
 
 bootstrap();
