@@ -18,6 +18,60 @@ async function bootstrap() {
     mkdirSync(uploadsPath, { recursive: true });
   }
 
+  /**
+   * IMPORTANTE:
+   * Aquí van los dominios desde donde se consume la API.
+   * O sea: FRONTEND, no backend.
+   */
+  const allowedOrigins = [
+    'http://127.0.0.1:3000',
+    'http://localhost:3000',
+    'http://127.0.0.1:5173',
+    'http://localhost:5173',
+
+    // Agrega aquí tu frontend real:
+    // 'https://tu-frontend.com',
+    // 'https://kiichpam.com',
+    // 'https://www.kiichpam.com',
+
+    // Si tu frontend también está en DigitalOcean App Platform:
+    // 'https://nombre-de-tu-frontend.ondigitalocean.app',
+  ];
+
+  app.enableCors({
+    origin: (origin, callback) => {
+      /**
+       * Permite requests sin origin:
+       * Swagger, Postman, Insomnia, curl, health checks, etc.
+       */
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      console.warn(`CORS bloqueado para origin: ${origin}`);
+
+      /**
+       * No mandes Error aquí porque te genera 500.
+       * Mejor regresar false.
+       */
+      return callback(null, false);
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'Stripe-Signature',
+      'Accept',
+      'Origin',
+    ],
+    optionsSuccessStatus: 204,
+  });
+
   app.use('/payments/webhook', express.raw({ type: 'application/json' }));
 
   app.use(
@@ -33,27 +87,6 @@ async function bootstrap() {
 
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
-
-  const allowedOrigins = [
-    'http://127.0.0.1:3000',
-    'http://localhost:3000',
-    'http://127.0.0.1:5173',
-    'http://localhost:5173',
-    'https://kiichpam-api-jpuw6.ondigitalocean.app',
-  ];
-
-  app.enableCors({
-    origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-
-      return callback(new Error(`CORS blocked for origin: ${origin}`), false);
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Stripe-Signature'],
-  });
 
   app.useGlobalPipes(
     new ValidationPipe({
@@ -77,8 +110,8 @@ async function bootstrap() {
   SwaggerModule.setup('docs', app, document);
 
   const port = Number(process.env.PORT) || 8080;
-  const publicUrl =
-    process.env.APP_URL || `http://localhost:${port}`;
+
+  const publicUrl = process.env.APP_URL || `http://localhost:${port}`;
 
   await app.listen(port, '0.0.0.0');
 
@@ -86,33 +119,6 @@ async function bootstrap() {
   console.log(`📚 Swagger available at: ${publicUrl}/docs`);
   console.log(`❤️ Health available at: ${publicUrl}/health`);
   console.log(`📡 Ping available at: ${publicUrl}/ping`);
-
-  const enableSelfPing = process.env.ENABLE_SELF_PING === 'true';
-  const selfPingMinutes = Number(process.env.SELF_PING_INTERVAL_MINUTES || 15);
-
-  if (enableSelfPing) {
-    const intervalMs = selfPingMinutes * 60 * 1000;
-
-    setInterval(async () => {
-      try {
-        const response = await fetch(`${publicUrl}/ping`, {
-          method: 'GET',
-        });
-
-        console.log(
-          `📡 SELF_PING ${new Date().toISOString()} -> ${publicUrl}/ping [${response.status}]`,
-        );
-      } catch (error) {
-        console.error('❌ SELF_PING error');
-
-        if (error instanceof Error) {
-          console.error(error.message);
-        }
-      }
-    }, intervalMs);
-
-    console.log(`⏱️ Self ping enabled every ${selfPingMinutes} minutes`);
-  }
 }
 
 bootstrap();
