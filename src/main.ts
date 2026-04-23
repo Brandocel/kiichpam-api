@@ -31,7 +31,7 @@ async function bootstrap() {
     'http://localhost:5173',
 
     // Agrega aquí tu frontend real:
-    // 'https://tu-frontend.com',
+    'https://dolphin-app-ogc8k.ondigitalocean.app',
     // 'https://kiichpam.com',
     // 'https://www.kiichpam.com',
 
