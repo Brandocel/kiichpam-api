@@ -433,3 +433,25 @@ model HeroCarouselSlide {
   @@index([isActive])
   @@map("hero_carousel_slides")
 }
+
+model ReservationEmailLog {
+  id            String   @id @default(uuid())
+  reservationId String
+  folio         String
+  type          String
+  to            String
+  subject       String
+  status        String   @default("PENDING")
+  provider      String   @default("RESEND")
+  providerId    String?
+  error         String?
+  metadata      Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([reservationId])
+  @@index([folio])
+  @@index([status])
+  @@map("reservation_email_logs")
+}

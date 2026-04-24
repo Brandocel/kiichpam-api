@@ -1,10 +1,15 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CouponsService } from '../coupons/coupons.service';
 import { CampaignsService } from '../campaigns/campaigns.service';
 import { QuoteDto } from './dto/quote.dto';
 import { ReservationPricingService } from './reservation-pricing.service';
 import { UpdateReservationContactDto } from './dto/update-reservation-contact.dto';
+import { ReservationMailService } from './reservation-mail.service';
 
 @Injectable()
 export class ReservationsService {
@@ -13,6 +18,7 @@ export class ReservationsService {
     private readonly pricingService: ReservationPricingService,
     private readonly couponsService: CouponsService,
     private readonly campaignsService: CampaignsService,
+    private readonly reservationMailService: ReservationMailService,
   ) {}
 
   async quote(dto: QuoteDto) {
@@ -141,6 +147,110 @@ export class ReservationsService {
     });
 
     return reservation;
+  }
+
+  async confirmPaidAndSendEmail(folio: string) {
+    const reservation = await this.prisma.reservation.findUnique({
+      where: { folio },
+      include: {
+        extras: true,
+        payments: true,
+        traces: true,
+        package: {
+          include: {
+            coverMedia: true,
+          },
+        },
+      },
+    });
+
+    if (!reservation) {
+      throw new NotFoundException('Reservation not found');
+    }
+
+    if (!reservation.email) {
+      throw new BadRequestException(
+        'No se puede enviar correo porque la reserva no tiene email',
+      );
+    }
+
+    const updatedReservation = await this.prisma.reservation.update({
+      where: { folio },
+      data: {
+        status: 'PAID',
+        traces: {
+          create: {
+            folio,
+            step: 'PAYMENT_CONFIRMED',
+            message: 'Payment confirmed and reservation marked as PAID',
+            metadata: {
+              previousStatus: reservation.status,
+            },
+          },
+        },
+      },
+      include: {
+        extras: true,
+        payments: true,
+        traces: true,
+        package: {
+          include: {
+            coverMedia: true,
+          },
+        },
+      },
+    });
+
+    const emailResult =
+      await this.reservationMailService.sendReservationPaidEmails(
+        updatedReservation,
+      );
+
+    return {
+      success: true,
+      message: 'Reserva marcada como pagada y correo procesado',
+      reservation: updatedReservation,
+      email: emailResult,
+    };
+  }
+
+  async resendPaidReservationEmail(folio: string) {
+    const reservation = await this.prisma.reservation.findUnique({
+      where: { folio },
+      include: {
+        extras: true,
+        payments: true,
+        traces: true,
+        package: {
+          include: {
+            coverMedia: true,
+          },
+        },
+      },
+    });
+
+    if (!reservation) {
+      throw new NotFoundException('Reservation not found');
+    }
+
+    if (reservation.status !== 'PAID') {
+      throw new BadRequestException(
+        'No se puede reenviar el correo porque la reserva todavía no está pagada',
+      );
+    }
+
+    const emailResult =
+      await this.reservationMailService.sendReservationPaidEmails(reservation);
+
+    return {
+      success: true,
+      message: 'Correo reenviado/procesado correctamente',
+      email: emailResult,
+    };
+  }
+
+  async getEmailStatus(folio: string) {
+    return this.reservationMailService.getEmailStatusByFolio(folio);
   }
 
   async findByFolio(folio: string) {

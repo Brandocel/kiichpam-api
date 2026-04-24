@@ -31,4 +31,19 @@ export class ReservationsController {
   ) {
     return this.service.updateContact(folio, body);
   }
+
+  @Post(':folio/confirm-paid')
+  confirmPaid(@Param('folio') folio: string) {
+    return this.service.confirmPaidAndSendEmail(folio);
+  }
+
+  @Post(':folio/resend-email')
+  resendEmail(@Param('folio') folio: string) {
+    return this.service.resendPaidReservationEmail(folio);
+  }
+
+  @Get(':folio/email-status')
+  emailStatus(@Param('folio') folio: string) {
+    return this.service.getEmailStatus(folio);
+  }
 }
