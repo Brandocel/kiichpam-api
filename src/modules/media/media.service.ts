@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { MediaKind } from '@prisma/client';
+import type { Express } from 'express';
 import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
@@ -33,10 +34,28 @@ export class MediaService {
 
   private getExtFromFilename(filename: string): string {
     const parts = filename.split('.');
-    return parts.length > 1 ? parts.pop()?.toLowerCase() || '' : '';
+
+    if (parts.length <= 1) {
+      return '';
+    }
+
+    return parts.pop()?.toLowerCase() || '';
   }
 
-  private mapAsset(asset: any) {
+  private mapAsset(asset: {
+    id: string;
+    kind: MediaKind;
+    mimeType: string;
+    ext: string;
+    size: number;
+    originalName: string;
+    filename: string;
+    path: string;
+    url: string;
+    isActive: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+  }) {
     return {
       id: asset.id,
       kind: asset.kind,
@@ -89,7 +108,7 @@ export class MediaService {
             filename: file.filename,
             path: `media/file/${file.filename}`,
             url: `/media/file/${file.filename}`,
-            data: file.buffer,
+            data: new Uint8Array(file.buffer),
           },
         }),
       ),

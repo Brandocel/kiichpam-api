@@ -23,8 +23,8 @@ import {
 } from '@nestjs/swagger';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
-import { Response } from 'express';
 import { extname } from 'path';
+import type { Express, Response } from 'express';
 import { MediaService } from './media.service';
 
 function sanitizeBaseName(originalName: string) {
@@ -42,8 +42,12 @@ function sanitizeBaseName(originalName: string) {
   };
 }
 
-function fileFilter(req: any, file: Express.Multer.File, cb: Function) {
-  const allowed = [
+function fileFilter(
+  req: Express.Request,
+  file: Express.Multer.File,
+  cb: (error: Error | null, acceptFile: boolean) => void,
+) {
+  const allowedMimeTypes = [
     'image/jpeg',
     'image/png',
     'image/webp',
@@ -54,7 +58,7 @@ function fileFilter(req: any, file: Express.Multer.File, cb: Function) {
     'video/quicktime',
   ];
 
-  if (!allowed.includes(file.mimetype)) {
+  if (!allowedMimeTypes.includes(file.mimetype)) {
     return cb(
       new BadRequestException(`Tipo de archivo no permitido: ${file.mimetype}`),
       false,
