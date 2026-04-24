@@ -1,16 +1,39 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../../prisma/prisma.service';
-import { join } from 'path';
-import { promises as fs } from 'fs';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { MediaKind } from '@prisma/client';
-import { Express } from 'express';   // ← Agregado
+import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
 export class MediaService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private readonly maxFileSize = 5 * 1024 * 1024;
+
   private kindFromMime(mime: string): MediaKind {
     return mime.startsWith('video/') ? MediaKind.VIDEO : MediaKind.IMAGE;
+  }
+
+  getExtensionFromMimeType(mimeType: string): string {
+    const extensions: Record<string, string> = {
+      'image/jpeg': '.jpg',
+      'image/png': '.png',
+      'image/webp': '.webp',
+      'image/avif': '.avif',
+      'image/gif': '.gif',
+      'video/mp4': '.mp4',
+      'video/webm': '.webm',
+      'video/quicktime': '.mov',
+    };
+
+    return extensions[mimeType] || '.bin';
+  }
+
+  private getExtFromFilename(filename: string): string {
+    const parts = filename.split('.');
+    return parts.length > 1 ? parts.pop()?.toLowerCase() || '' : '';
   }
 
   private mapAsset(asset: any) {
@@ -40,33 +63,43 @@ export class MediaService {
       };
     }
 
-    await this.prisma.mediaAsset.createMany({
-      data: files.map((f) => ({
-        kind: this.kindFromMime(f.mimetype),
-        mimeType: f.mimetype,
-        ext: (f.originalname.split('.').pop() || '').toLowerCase(),
-        size: f.size,
-        originalName: f.originalname,
-        filename: f.filename,
-        path: `uploads/${f.filename}`,
-        url: `/uploads/${f.filename}`,
-      })),
-    });
+    for (const file of files) {
+      if (!file.buffer) {
+        throw new BadRequestException(
+          `El archivo ${file.originalname} no contiene datos en memoria`,
+        );
+      }
 
-    const filenames = files.map((f) => f.filename);
+      if (file.size > this.maxFileSize) {
+        throw new BadRequestException(
+          `El archivo ${file.originalname} supera el límite de 5 MB`,
+        );
+      }
+    }
 
-    const assets = await this.prisma.mediaAsset.findMany({
-      where: {
-        OR: filenames.map((filename) => ({ filename })),
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+    const createdAssets = await this.prisma.$transaction(
+      files.map((file) =>
+        this.prisma.mediaAsset.create({
+          data: {
+            kind: this.kindFromMime(file.mimetype),
+            mimeType: file.mimetype,
+            ext: this.getExtFromFilename(file.filename),
+            size: file.size,
+            originalName: file.originalname,
+            filename: file.filename,
+            path: `media/file/${file.filename}`,
+            url: `/media/file/${file.filename}`,
+            data: file.buffer,
+          },
+        }),
+      ),
+    );
 
     return {
       success: true,
       message: 'Archivos registrados correctamente',
-      uploaded: assets.length,
-      data: assets.map((asset) => this.mapAsset(asset)),
+      uploaded: createdAssets.length,
+      data: createdAssets.map((asset) => this.mapAsset(asset)),
     };
   }
 
@@ -78,7 +111,23 @@ export class MediaService {
           ? { isActive: filters.isActive }
           : {}),
       },
-      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        kind: true,
+        mimeType: true,
+        ext: true,
+        size: true,
+        originalName: true,
+        filename: true,
+        path: true,
+        url: true,
+        isActive: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
     });
 
     return {
@@ -90,7 +139,23 @@ export class MediaService {
 
   async getById(id: string) {
     const asset = await this.prisma.mediaAsset.findUnique({
-      where: { id },
+      where: {
+        id,
+      },
+      select: {
+        id: true,
+        kind: true,
+        mimeType: true,
+        ext: true,
+        size: true,
+        originalName: true,
+        filename: true,
+        path: true,
+        url: true,
+        isActive: true,
+        createdAt: true,
+        updatedAt: true,
+      },
     });
 
     if (!asset) {
@@ -104,42 +169,46 @@ export class MediaService {
     };
   }
 
-  async toggleActive(id: string) {
+  async getFileByFilename(filename: string) {
     const asset = await this.prisma.mediaAsset.findUnique({
-      where: { id },
+      where: {
+        filename,
+      },
+      select: {
+        id: true,
+        filename: true,
+        mimeType: true,
+        size: true,
+        data: true,
+        isActive: true,
+      },
     });
 
     if (!asset) {
-      throw new NotFoundException('Media no encontrada');
+      throw new NotFoundException('Archivo no encontrado');
     }
 
-    const updated = await this.prisma.mediaAsset.update({
-      where: { id },
-      data: { isActive: !asset.isActive },
-    });
+    if (!asset.isActive) {
+      throw new NotFoundException('Archivo no disponible');
+    }
+
+    if (!asset.data) {
+      throw new NotFoundException('El archivo no contiene datos');
+    }
 
     return {
-      success: true,
-      message: `Media ${updated.isActive ? 'activada' : 'desactivada'} correctamente`,
-      data: this.mapAsset(updated),
+      id: asset.id,
+      filename: asset.filename,
+      mimeType: asset.mimeType,
+      size: asset.size,
+      data: Buffer.from(asset.data),
     };
   }
 
-  async remove(id: string) {
+  async toggleActive(id: string) {
     const asset = await this.prisma.mediaAsset.findUnique({
-      where: { id },
-      select: {
-        id: true,
-        kind: true,
-        mimeType: true,
-        ext: true,
-        size: true,
-        originalName: true,
-        path: true,
-        url: true,
-        isActive: true,
-        createdAt: true,
-        updatedAt: true,
+      where: {
+        id,
       },
     });
 
@@ -147,28 +216,51 @@ export class MediaService {
       throw new NotFoundException('Media no encontrada');
     }
 
-    if (!asset.path) {
-      throw new NotFoundException('El archivo no tiene una ruta válida');
-    }
+    const updated = await this.prisma.mediaAsset.update({
+      where: {
+        id,
+      },
+      data: {
+        isActive: !asset.isActive,
+      },
+    });
 
-    const absFilePath = join(process.cwd(), asset.path);
+    return {
+      success: true,
+      message: `Media ${
+        updated.isActive ? 'activada' : 'desactivada'
+      } correctamente`,
+      data: this.mapAsset(updated),
+    };
+  }
 
-    try {
-      await fs.unlink(absFilePath);
-    } catch (e: any) {
-      if (e?.code !== 'ENOENT') {
-        throw e;
-      }
+  async remove(id: string) {
+    const asset = await this.prisma.mediaAsset.findUnique({
+      where: {
+        id,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!asset) {
+      throw new NotFoundException('Media no encontrada');
     }
 
     await this.prisma.mediaAsset.delete({
-      where: { id },
+      where: {
+        id,
+      },
     });
 
     return {
       success: true,
       message: 'Media eliminada correctamente',
-      data: { id, deleted: true },
+      data: {
+        id,
+        deleted: true,
+      },
     };
   }
 }

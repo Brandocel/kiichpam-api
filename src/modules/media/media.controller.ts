@@ -1,28 +1,31 @@
 import {
   BadRequestException,
   Controller,
+  Delete,
   Get,
+  Header,
   Param,
   Patch,
   Post,
   Query,
+  Res,
   UploadedFiles,
   UseInterceptors,
-  Delete,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiBody,
   ApiConsumes,
+  ApiOperation,
+  ApiParam,
   ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
 import { FilesInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname, join } from 'path';
-import { existsSync, mkdirSync } from 'fs';
+import { memoryStorage } from 'multer';
+import { Response } from 'express';
+import { extname } from 'path';
 import { MediaService } from './media.service';
-import { Express } from 'express';   // ← Importante agregar esto
 
 function sanitizeBaseName(originalName: string) {
   const cleaned = (originalName || 'file')
@@ -33,7 +36,10 @@ function sanitizeBaseName(originalName: string) {
   const ext = extname(cleaned);
   const base = cleaned.slice(0, -ext.length) || 'file';
 
-  return { base: base.slice(-80), ext };
+  return {
+    base: base.slice(-80),
+    ext,
+  };
 }
 
 function fileFilter(req: any, file: Express.Multer.File, cb: Function) {
@@ -65,6 +71,9 @@ export class MediaController {
 
   @Post('upload')
   @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Subir imágenes o videos y guardarlos en PostgreSQL',
+  })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     schema: {
@@ -72,7 +81,10 @@ export class MediaController {
       properties: {
         files: {
           type: 'array',
-          items: { type: 'string', format: 'binary' },
+          items: {
+            type: 'string',
+            format: 'binary',
+          },
         },
       },
       required: ['files'],
@@ -80,38 +92,53 @@ export class MediaController {
   })
   @UseInterceptors(
     FilesInterceptor('files', 10, {
-      storage: diskStorage({
-        destination: (req, file, cb) => {
-          const uploadPath = join(process.cwd(), 'uploads');
-
-          if (!existsSync(uploadPath)) {
-            mkdirSync(uploadPath, { recursive: true });
-          }
-
-          cb(null, uploadPath);
-        },
-        filename: (req, file, cb) => {
-          const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-          const { base, ext } = sanitizeBaseName(file.originalname);
-
-          cb(null, `${unique}-${base}${ext}`);
-        },
-      }),
+      storage: memoryStorage(),
       fileFilter,
-      limits: { fileSize: 50 * 1024 * 1024 },
+      limits: {
+        fileSize: 5 * 1024 * 1024,
+      },
     }),
   )
   async upload(@UploadedFiles() files: Express.Multer.File[]) {
     if (!files?.length) {
       throw new BadRequestException('No se subieron archivos');
     }
-    return this.mediaService.registerUploadedFiles(files);
+
+    const preparedFiles = files.map((file) => {
+      const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+      const { base, ext } = sanitizeBaseName(file.originalname);
+
+      const safeExt =
+        ext ||
+        this.mediaService.getExtensionFromMimeType(file.mimetype) ||
+        '.bin';
+
+      const filename = `${unique}-${base}${safeExt}`;
+
+      return {
+        ...file,
+        filename,
+      };
+    });
+
+    return this.mediaService.registerUploadedFiles(preparedFiles);
   }
 
   @Get()
   @ApiBearerAuth()
-  @ApiQuery({ name: 'kind', required: false, enum: ['IMAGE', 'VIDEO'] })
-  @ApiQuery({ name: 'isActive', required: false, enum: ['true', 'false'] })
+  @ApiOperation({
+    summary: 'Listar archivos media registrados',
+  })
+  @ApiQuery({
+    name: 'kind',
+    required: false,
+    enum: ['IMAGE', 'VIDEO'],
+  })
+  @ApiQuery({
+    name: 'isActive',
+    required: false,
+    enum: ['true', 'false'],
+  })
   async list(
     @Query('kind') kind?: 'IMAGE' | 'VIDEO',
     @Query('isActive') isActive?: 'true' | 'false',
@@ -122,20 +149,51 @@ export class MediaController {
     });
   }
 
+  @Get('file/:filename')
+  @ApiOperation({
+    summary: 'Servir archivo media desde PostgreSQL',
+  })
+  @ApiParam({
+    name: 'filename',
+    required: true,
+  })
+  @Header('Cross-Origin-Resource-Policy', 'cross-origin')
+  async serveFile(
+    @Param('filename') filename: string,
+    @Res() res: Response,
+  ) {
+    const file = await this.mediaService.getFileByFilename(filename);
+
+    res.setHeader('Content-Type', file.mimeType);
+    res.setHeader('Content-Length', file.size.toString());
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+
+    return res.send(file.data);
+  }
+
   @Get(':id')
   @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Obtener media por ID',
+  })
   async getById(@Param('id') id: string) {
     return this.mediaService.getById(id);
   }
 
   @Patch(':id/toggle')
   @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Activar o desactivar media',
+  })
   async toggle(@Param('id') id: string) {
     return this.mediaService.toggleActive(id);
   }
 
   @Delete(':id')
   @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Eliminar media',
+  })
   async remove(@Param('id') id: string) {
     return this.mediaService.remove(id);
   }
