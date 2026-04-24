@@ -404,7 +404,7 @@ model MediaAsset {
   url          String
   isActive     Boolean   @default(true)
 
-  data         Bytes
+  data         Bytes?
 
   packageCoverOf     Package[]             @relation("PackageCover")
   campaignCoverOf    CampaignTranslation[] @relation("CampaignCover")
