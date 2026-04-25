@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiQuery, ApiTags } from '@nestjs/swagger';
@@ -24,7 +25,11 @@ export class PackagesController {
   @ApiQuery({ name: 'adults', required: false, example: 2 })
   @ApiQuery({ name: 'children', required: false, example: 0 })
   @ApiQuery({ name: 'infants', required: false, example: 0 })
-  @ApiQuery({ name: 'quoteAt', required: false, example: '2026-04-07T12:00:00.000Z' })
+  @ApiQuery({
+    name: 'quoteAt',
+    required: false,
+    example: '2026-04-07T12:00:00.000Z',
+  })
   @ApiQuery({ name: 'withCampaign', required: false, example: true })
   findAll(
     @Query('lang') lang?: string,
@@ -52,7 +57,11 @@ export class PackagesController {
   @ApiQuery({ name: 'adults', required: false, example: 2 })
   @ApiQuery({ name: 'children', required: false, example: 0 })
   @ApiQuery({ name: 'infants', required: false, example: 0 })
-  @ApiQuery({ name: 'quoteAt', required: false, example: '2026-04-07T12:00:00.000Z' })
+  @ApiQuery({
+    name: 'quoteAt',
+    required: false,
+    example: '2026-04-07T12:00:00.000Z',
+  })
   @ApiQuery({ name: 'withCampaign', required: false, example: true })
   findOne(
     @Param('code') code: string,
@@ -80,6 +89,13 @@ export class PackagesController {
   @ApiBody({ type: CreatePackageDto })
   create(@Body() dto: CreatePackageDto) {
     return this.service.create(dto);
+  }
+
+  @Put(':code')
+  @ApiBearerAuth()
+  @ApiBody({ type: CreatePackageDto })
+  replace(@Param('code') code: string, @Body() dto: CreatePackageDto) {
+    return this.service.replaceByCode(code, dto);
   }
 
   @Patch(':code/cover')

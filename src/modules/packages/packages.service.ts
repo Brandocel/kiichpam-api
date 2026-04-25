@@ -343,6 +343,166 @@ export class PackagesService {
     };
   }
 
+  async replaceByCode(code: string, dto: CreatePackageDto) {
+    const pkg = await this.prisma.package.findUnique({
+      where: { code },
+    });
+
+    if (!pkg) {
+      throw new NotFoundException('Package not found');
+    }
+
+    if (!dto.code) {
+      throw new BadRequestException('Package code is required');
+    }
+
+    if (dto.code !== code) {
+      const existingCode = await this.prisma.package.findUnique({
+        where: { code: dto.code },
+      });
+
+      if (existingCode) {
+        throw new BadRequestException('Package code already exists');
+      }
+    }
+
+    if (dto.translations?.length) {
+      const langs = dto.translations.map((t) => t.lang);
+
+      if (new Set(langs).size !== langs.length) {
+        throw new BadRequestException('Duplicated lang in translations');
+      }
+    }
+
+    if (dto.extras?.length) {
+      const codes = dto.extras.map((e) => e.code);
+
+      if (new Set(codes).size !== codes.length) {
+        throw new BadRequestException('Duplicated extra code in extras');
+      }
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const extras = await tx.packageExtra.findMany({
+        where: { packageId: pkg.id },
+        select: { id: true },
+      });
+
+      const extraIds = extras.map((extra) => extra.id);
+
+      if (extraIds.length > 0) {
+        await tx.packageExtraTranslation.deleteMany({
+          where: {
+            extraId: {
+              in: extraIds,
+            },
+          },
+        });
+      }
+
+      await tx.packageExtra.deleteMany({
+        where: {
+          packageId: pkg.id,
+        },
+      });
+
+      await tx.packageTranslation.deleteMany({
+        where: {
+          packageId: pkg.id,
+        },
+      });
+
+      return tx.package.update({
+        where: { code },
+        data: {
+          code: dto.code,
+          isActive: dto.isActive ?? true,
+
+          adultPriceMXN: dto.adultPriceMXN,
+          childPriceMXN: dto.childPriceMXN ?? 0,
+          infantPriceMXN: dto.infantPriceMXN ?? 0,
+          currency: dto.currency ?? 'MXN',
+
+          maxAdults: dto.maxAdults ?? null,
+          maxChildren: dto.maxChildren ?? null,
+          maxInfants: dto.maxInfants ?? null,
+
+          ageRules: dto.ageRules
+            ? {
+                adultMin: dto.ageRules.adultMin,
+                childMin: dto.ageRules.childMin,
+                childMax: dto.ageRules.childMax,
+                infantMax: dto.ageRules.infantMax,
+              }
+            : undefined,
+
+          translations: dto.translations?.length
+            ? {
+                create: dto.translations.map((t) => ({
+                  lang: t.lang,
+                  name: t.name,
+                  description: t.description ?? null,
+                  includes: t.includes ?? undefined,
+                  excludes: t.excludes ?? undefined,
+                  notes: t.notes ?? undefined,
+                })),
+              }
+            : undefined,
+
+          extras: dto.extras?.length
+            ? {
+                create: dto.extras.map((e) => ({
+                  code: e.code,
+                  priceMXN: e.priceMXN,
+                  currency: e.currency ?? 'MXN',
+                  isRequired: e.isRequired ?? false,
+                  isActive: e.isActive ?? true,
+                  translations: e.translations?.length
+                    ? {
+                        create: e.translations.map((t) => ({
+                          lang: t.lang,
+                          name: t.name,
+                          description: t.description ?? null,
+                        })),
+                      }
+                    : undefined,
+                })),
+              }
+            : undefined,
+        },
+        include: {
+          coverMedia: { select: { id: true, url: true, mimeType: true } },
+          translations: {
+            where: { lang: 'es' },
+            select: {
+              lang: true,
+              name: true,
+              description: true,
+              includes: true,
+              excludes: true,
+              notes: true,
+            },
+          },
+          extras: {
+            where: { isActive: true },
+            include: {
+              translations: {
+                where: { lang: 'es' },
+                select: { lang: true, name: true, description: true },
+              },
+            },
+          },
+        },
+      });
+    });
+
+    return {
+      success: true,
+      message: 'Package replaced',
+      data: this.mapPackage(updated),
+    };
+  }
+
   async updateByCode(code: string, dto: UpdatePackageDto) {
     const pkg = await this.prisma.package.findUnique({ where: { code } });
     if (!pkg) throw new NotFoundException('Package not found');
