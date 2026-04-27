@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { calendar_v3, google } from 'googleapis';
+import { PrismaService } from '../../prisma/prisma.service';
 
 type ProposalReservationCalendarInput = {
   folio: string;
@@ -24,7 +25,7 @@ export class GoogleCalendarService {
   private readonly timeZone: string;
   private readonly enabled: boolean;
 
-  constructor() {
+  constructor(private readonly prisma: PrismaService) {
     const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
     const privateKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY?.replace(
       /\\n/g,
@@ -61,69 +62,134 @@ export class GoogleCalendarService {
   }
 
   async upsertReservationEvent(reservation: any) {
-    if (!this.enabled || !this.calendar || !this.calendarId) {
-      this.logger.warn(
-        `No se creó evento de calendario para ${reservation?.folio ?? 'N/A'} porque Google Calendar no está configurado`,
+    try {
+      if (!this.enabled || !this.calendar || !this.calendarId) {
+        const result = {
+          enabled: false,
+          created: false,
+          updated: false,
+          message: 'Google Calendar no está configurado',
+          requiredEnv: [
+            'GOOGLE_SERVICE_ACCOUNT_EMAIL',
+            'GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY',
+            'GOOGLE_CALENDAR_ID',
+          ],
+        };
+
+        this.logger.warn(
+          `No se creó evento de calendario para ${
+            reservation?.folio ?? 'N/A'
+          } porque Google Calendar no está configurado`,
+        );
+
+        await this.createCalendarTrace({
+          reservationId: reservation?.id,
+          folio: reservation?.folio,
+          step: 'GOOGLE_CALENDAR_SYNC_FAILED',
+          message: 'Google Calendar no está configurado',
+          metadata: result,
+        });
+
+        return result;
+      }
+
+      if (!reservation?.folio) {
+        throw new Error('La reservación no tiene folio');
+      }
+
+      if (!reservation?.visitDate) {
+        throw new Error(`La reservación ${reservation.folio} no tiene visitDate`);
+      }
+
+      const existingEvent = await this.findExistingEventByFolio(
+        reservation.folio,
+        reservation.visitDate,
       );
-      return {
-        enabled: false,
-        created: false,
-        updated: false,
-        message: 'Google Calendar no está configurado',
-      };
-    }
 
-    if (!reservation?.folio) {
-      throw new Error('La reservación no tiene folio');
-    }
+      const requestBody = this.buildReservationEvent(reservation);
 
-    if (!reservation?.visitDate) {
-      throw new Error(`La reservación ${reservation.folio} no tiene visitDate`);
-    }
+      if (existingEvent?.id) {
+        const updated = await this.calendar.events.update({
+          calendarId: this.calendarId,
+          eventId: existingEvent.id,
+          requestBody,
+        });
 
-    const existingEvent = await this.findExistingEventByFolio(
-      reservation.folio,
-      reservation.visitDate,
-    );
+        const result = {
+          enabled: true,
+          created: false,
+          updated: true,
+          eventId: updated.data.id,
+          htmlLink: updated.data.htmlLink,
+        };
 
-    const requestBody = this.buildReservationEvent(reservation);
+        this.logger.log(
+          `Evento de Google Calendar actualizado para folio ${reservation.folio}. EventId=${updated.data.id}`,
+        );
 
-    if (existingEvent?.id) {
-      const updated = await this.calendar.events.update({
+        await this.createCalendarTrace({
+          reservationId: reservation.id,
+          folio: reservation.folio,
+          step: 'GOOGLE_CALENDAR_SYNCED',
+          message: 'Evento de Google Calendar actualizado correctamente',
+          metadata: result,
+        });
+
+        return result;
+      }
+
+      const inserted = await this.calendar.events.insert({
         calendarId: this.calendarId,
-        eventId: existingEvent.id,
         requestBody,
       });
 
+      const result = {
+        enabled: true,
+        created: true,
+        updated: false,
+        eventId: inserted.data.id,
+        htmlLink: inserted.data.htmlLink,
+      };
+
       this.logger.log(
-        `Evento de Google Calendar actualizado para folio ${reservation.folio}. EventId=${updated.data.id}`,
+        `Evento de Google Calendar creado para folio ${reservation.folio}. EventId=${inserted.data.id}`,
       );
 
+      await this.createCalendarTrace({
+        reservationId: reservation.id,
+        folio: reservation.folio,
+        step: 'GOOGLE_CALENDAR_SYNCED',
+        message: 'Evento de Google Calendar creado correctamente',
+        metadata: result,
+      });
+
+      return result;
+    } catch (error: any) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      this.logger.error(
+        `Error al sincronizar Google Calendar para ${
+          reservation?.folio ?? 'N/A'
+        }: ${message}`,
+      );
+
+      await this.createCalendarTrace({
+        reservationId: reservation?.id,
+        folio: reservation?.folio,
+        step: 'GOOGLE_CALENDAR_SYNC_FAILED',
+        message: 'Falló la sincronización con Google Calendar',
+        metadata: {
+          error: message,
+        },
+      });
+
       return {
-        enabled: true,
+        enabled: this.enabled,
         created: false,
-        updated: true,
-        eventId: updated.data.id,
-        htmlLink: updated.data.htmlLink,
+        updated: false,
+        error: message,
       };
     }
-
-    const inserted = await this.calendar.events.insert({
-      calendarId: this.calendarId,
-      requestBody,
-    });
-
-    this.logger.log(
-      `Evento de Google Calendar creado para folio ${reservation.folio}. EventId=${inserted.data.id}`,
-    );
-
-    return {
-      enabled: true,
-      created: true,
-      updated: false,
-      eventId: inserted.data.id,
-      htmlLink: inserted.data.htmlLink,
-    };
   }
 
   async upsertProposalReservationEvent(
@@ -238,6 +304,37 @@ export class GoogleCalendarService {
       canceled: true,
       eventId: event.id,
     };
+  }
+
+  private async createCalendarTrace(params: {
+    reservationId?: string | null;
+    folio?: string | null;
+    step: string;
+    message: string;
+    metadata?: any;
+  }) {
+    try {
+      if (!params.reservationId || !params.folio) {
+        this.logger.warn(
+          `No se pudo guardar trace de calendario porque falta reservationId o folio. Step=${params.step}`,
+        );
+        return;
+      }
+
+      await this.prisma.reservationTrace.create({
+        data: {
+          reservationId: params.reservationId,
+          folio: params.folio,
+          step: params.step,
+          message: params.message,
+          metadata: params.metadata ?? undefined,
+        },
+      });
+    } catch (error: any) {
+      this.logger.error(
+        `No se pudo guardar trace de Google Calendar: ${error.message}`,
+      );
+    }
   }
 
   private async findExistingEventByFolio(
