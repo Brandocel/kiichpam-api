@@ -26,13 +26,19 @@ export class GoogleCalendarService {
   private readonly enabled: boolean;
 
   constructor(private readonly prisma: PrismaService) {
-    const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-    const privateKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY?.replace(
-      /\\n/g,
-      '\n',
-    );
-    const calendarId = process.env.GOOGLE_CALENDAR_ID;
-    const timeZone = process.env.GOOGLE_CALENDAR_TIME_ZONE || 'America/Cancun';
+    const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL?.trim();
+
+    const rawPrivateKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY;
+
+    const privateKey = rawPrivateKey
+      ?.trim()
+      .replace(/^["']/, '')
+      .replace(/["']$/, '')
+      .replace(/\\n/g, '\n');
+
+    const calendarId = process.env.GOOGLE_CALENDAR_ID?.trim();
+    const timeZone =
+      process.env.GOOGLE_CALENDAR_TIME_ZONE?.trim() || 'America/Cancun';
 
     this.calendarId = calendarId ?? null;
     this.timeZone = timeZone;
