@@ -116,6 +116,7 @@ export class PaymentsController {
 
   @common.Post('webhook')
   @ApiExcludeEndpoint()
+  @common.HttpCode(200)
   async handleWebhook(
     @common.Headers('stripe-signature') signature: string | undefined,
     @common.Req() req: common.RawBodyRequest<Request>,
