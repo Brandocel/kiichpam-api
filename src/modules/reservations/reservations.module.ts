@@ -3,6 +3,7 @@ import { ReservationsController } from './reservations.controller';
 import { ReservationsService } from './reservations.service';
 import { ReservationPricingService } from './reservation-pricing.service';
 import { ReservationMailService } from './reservation-mail.service';
+import { ReservationLifecycleService } from './reservation-lifecycle.service';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { CouponsModule } from '../coupons/coupons.module';
 import { CampaignsModule } from '../campaigns/campaigns.module';
@@ -14,11 +15,13 @@ import { CampaignsModule } from '../campaigns/campaigns.module';
     ReservationsService,
     ReservationPricingService,
     ReservationMailService,
+    ReservationLifecycleService,
   ],
   exports: [
     ReservationsService,
     ReservationPricingService,
     ReservationMailService,
+    ReservationLifecycleService,
   ],
 })
 export class ReservationsModule {}

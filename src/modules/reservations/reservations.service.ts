@@ -10,6 +10,7 @@ import { QuoteDto } from './dto/quote.dto';
 import { ReservationPricingService } from './reservation-pricing.service';
 import { UpdateReservationContactDto } from './dto/update-reservation-contact.dto';
 import { ReservationMailService } from './reservation-mail.service';
+import { QueryReservationsDto } from './dto/query-reservations.dto';
 
 @Injectable()
 export class ReservationsService {
@@ -147,6 +148,248 @@ export class ReservationsService {
     });
 
     return reservation;
+  }
+
+  async findAll(query: QueryReservationsDto) {
+    const page = Number(query.page) > 0 ? Number(query.page) : 1;
+    const limit =
+      Number(query.limit) > 0 ? Math.min(Number(query.limit), 100) : 20;
+    const skip = (page - 1) * limit;
+
+    const search = query.search?.trim();
+    const status = query.status?.trim().toUpperCase();
+    const packageCode = query.packageCode?.trim().toUpperCase();
+    const email = query.email?.trim().toLowerCase();
+
+    const allowedSortBy = ['createdAt', 'visitDate', 'totalMXN'];
+    const sortBy = allowedSortBy.includes(query.sortBy ?? '')
+      ? query.sortBy!
+      : 'createdAt';
+
+    const sortOrder = query.sortOrder === 'asc' ? 'asc' : 'desc';
+
+    const visitDateFilter: {
+      gte?: Date;
+      lte?: Date;
+    } = {};
+
+    if (query.from) {
+      const fromDate = new Date(query.from);
+
+      if (!Number.isNaN(fromDate.getTime())) {
+        fromDate.setHours(0, 0, 0, 0);
+        visitDateFilter.gte = fromDate;
+      }
+    }
+
+    if (query.to) {
+      const toDate = new Date(query.to);
+
+      if (!Number.isNaN(toDate.getTime())) {
+        toDate.setHours(23, 59, 59, 999);
+        visitDateFilter.lte = toDate;
+      }
+    }
+
+    const where: any = {
+      ...(status ? { status } : {}),
+
+      ...(email
+        ? {
+            email: {
+              contains: email,
+              mode: 'insensitive',
+            },
+          }
+        : {}),
+
+      ...(Object.keys(visitDateFilter).length > 0
+        ? {
+            visitDate: visitDateFilter,
+          }
+        : {}),
+
+      ...(packageCode
+        ? {
+            package: {
+              code: {
+                contains: packageCode,
+                mode: 'insensitive',
+              },
+            },
+          }
+        : {}),
+
+      ...(search
+        ? {
+            OR: [
+              {
+                folio: {
+                  contains: search,
+                  mode: 'insensitive',
+                },
+              },
+              {
+                firstName: {
+                  contains: search,
+                  mode: 'insensitive',
+                },
+              },
+              {
+                lastName: {
+                  contains: search,
+                  mode: 'insensitive',
+                },
+              },
+              {
+                email: {
+                  contains: search,
+                  mode: 'insensitive',
+                },
+              },
+              {
+                phone: {
+                  contains: search,
+                  mode: 'insensitive',
+                },
+              },
+              {
+                country: {
+                  contains: search,
+                  mode: 'insensitive',
+                },
+              },
+            ],
+          }
+        : {}),
+    };
+
+    const [total, reservations, statusRows] = await this.prisma.$transaction([
+      this.prisma.reservation.count({
+        where,
+      }),
+    
+      this.prisma.reservation.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: {
+          [sortBy]: sortOrder,
+        },
+        include: {
+          extras: true,
+          payments: true,
+          package: {
+            include: {
+              coverMedia: true,
+            },
+          },
+        },
+      }),
+    
+      this.prisma.reservation.findMany({
+        select: {
+          status: true,
+        },
+      }),
+    ]);
+    
+    const byStatus = statusRows.reduce(
+      (acc, item) => {
+        acc[item.status] = (acc[item.status] ?? 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
+
+    const totalPages = Math.ceil(total / limit);
+
+    return {
+      success: true,
+      message: 'Reservaciones obtenidas correctamente',
+      filters: {
+        page,
+        limit,
+        search: search ?? null,
+        status: status ?? null,
+        packageCode: packageCode ?? null,
+        email: email ?? null,
+        from: query.from ?? null,
+        to: query.to ?? null,
+        sortBy,
+        sortOrder,
+      },
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
+      summary: {
+        total,
+        byStatus,
+      },
+      data: reservations.map((reservation) => ({
+        id: reservation.id,
+        folio: reservation.folio,
+        status: reservation.status,
+        visitDate: reservation.visitDate,
+
+        passengers: {
+          adults: reservation.adults,
+          children: reservation.children,
+          infants: reservation.infants,
+        },
+
+        customer: {
+          firstName: reservation.firstName,
+          lastName: reservation.lastName,
+          email: reservation.email,
+          phone: reservation.phone,
+          country: reservation.country,
+          comments: reservation.comments,
+        },
+
+        package: reservation.package
+          ? {
+              id: reservation.package.id,
+              code: reservation.package.code,
+              currency: reservation.package.currency,
+              coverMedia: reservation.package.coverMedia,
+            }
+          : null,
+
+        pricing: {
+          peopleSubtotalMXN: reservation.peopleSubtotalMXN,
+          subtotalMXN: reservation.subtotalMXN,
+          extrasMXN: reservation.extrasMXN,
+          discountMXN: reservation.discountMXN,
+          campaignDiscountMXN: reservation.campaignDiscountMXN,
+          couponDiscountMXN: reservation.couponDiscountMXN,
+          inapamDiscountMXN: reservation.inapamDiscountMXN,
+          totalMXN: reservation.totalMXN,
+          currency: reservation.currency,
+        },
+
+        campaign: {
+          campaignCode: reservation.campaignCode,
+          appliedCampaignCodes: reservation.appliedCampaignCodes,
+        },
+
+        coupon: {
+          couponCode: reservation.couponCode,
+          couponDiscountMXN: reservation.couponDiscountMXN,
+        },
+
+        extras: reservation.extras,
+        payments: reservation.payments,
+
+        createdAt: reservation.createdAt,
+        updatedAt: reservation.updatedAt,
+      })),
+    };
   }
 
   async confirmPaidAndSendEmail(folio: string) {
