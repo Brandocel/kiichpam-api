@@ -7,6 +7,7 @@ import {
 import Stripe from 'stripe';
 import { PrismaService } from '../../prisma/prisma.service';
 import { GoogleCalendarService } from '../google-calendar/google-calendar.service';
+import { ReservationMailService } from '../reservations/reservation-mail.service';
 
 type RefundReason = 'duplicate' | 'fraudulent' | 'requested_by_customer';
 
@@ -18,6 +19,7 @@ export class PaymentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly googleCalendarService: GoogleCalendarService,
+    private readonly reservationMailService: ReservationMailService,
   ) {
     const secretKey = process.env.STRIPE_SECRET_KEY;
 
@@ -34,19 +36,13 @@ export class PaymentsService {
     detectedUnit: 'mxn' | 'centavos';
   } {
     const numericAmount = Number(rawAmount);
-  
+
     if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
       throw new BadRequestException('Monto inválido para Stripe');
     }
-  
+
     const hasDecimals = !Number.isInteger(numericAmount);
-  
-    /**
-     * Reglas:
-     * - Si tiene decimales, viene en MXN. Ej: 1035.00
-     * - Si es entero y <= 10000, lo tratamos como MXN. Ej: 298
-     * - Si es entero y > 10000, lo tratamos como centavos. Ej: 29800
-     */
+
     if (hasDecimals || numericAmount <= 10000) {
       return {
         reservationTotalMXN: numericAmount,
@@ -54,14 +50,14 @@ export class PaymentsService {
         detectedUnit: 'mxn',
       };
     }
-  
+
     return {
       reservationTotalMXN: numericAmount / 100,
       stripeAmount: Math.round(numericAmount),
       detectedUnit: 'centavos',
     };
   }
-  
+
   private buildCardResponse(
     reservation: {
       id: string;
@@ -88,7 +84,7 @@ export class PaymentsService {
       },
     };
   }
-  
+
   private buildOxxoResponse(
     reservation: {
       id: string;
@@ -101,7 +97,7 @@ export class PaymentsService {
     message: string,
   ) {
     const oxxoDetails = this.getOxxoDisplayDetails(paymentIntent);
-  
+
     return {
       folio: reservation.folio,
       status: paymentIntent.status,
@@ -484,10 +480,21 @@ export class PaymentsService {
       data: {
         status: newStatus,
       },
+      include: {
+        extras: true,
+        payments: true,
+        traces: true,
+        package: {
+          include: {
+            coverMedia: true,
+          },
+        },
+      },
     });
 
     if (newStatus === 'PAID') {
       await this.syncReservationToGoogleCalendar(normalizedFolio);
+      await this.sendPaidReservationEmailsFromWebhook(updatedReservation);
     }
 
     const paymentStatus = this.mapReservationStatus(updatedReservation.status);
@@ -698,7 +705,9 @@ export class PaymentsService {
       );
     }
 
-    const canceledIntent = await this.stripe.paymentIntents.cancel(paymentIntent.id);
+    const canceledIntent = await this.stripe.paymentIntents.cancel(
+      paymentIntent.id,
+    );
 
     await this.prisma.reservation.update({
       where: { folio: normalizedFolio },
@@ -734,7 +743,7 @@ export class PaymentsService {
       throw new BadRequestException('Falta el header stripe-signature');
     }
 
-    if (!rawBody || !(rawBody instanceof Buffer)) {
+    if (!rawBody || !Buffer.isBuffer(rawBody)) {
       throw new BadRequestException('Raw body inválido para webhook');
     }
 
@@ -811,6 +820,16 @@ export class PaymentsService {
 
     const reservation = await this.prisma.reservation.findUnique({
       where: { folio },
+      include: {
+        extras: true,
+        payments: true,
+        traces: true,
+        package: {
+          include: {
+            coverMedia: true,
+          },
+        },
+      },
     });
 
     if (!reservation) {
@@ -818,16 +837,42 @@ export class PaymentsService {
       return;
     }
 
-    await this.prisma.reservation.update({
+    const updatedReservation = await this.prisma.reservation.update({
       where: { folio },
       data: {
         status: 'PAID',
+        traces: {
+          create: {
+            folio,
+            step: 'STRIPE_PAYMENT_SUCCEEDED',
+            message: 'Stripe confirmed payment_intent.succeeded',
+            metadata: {
+              stripePaymentIntentId: paymentIntent.id,
+              stripeStatus: paymentIntent.status,
+              amount: paymentIntent.amount,
+              amountReceived: paymentIntent.amount_received,
+              currency: paymentIntent.currency,
+              previousStatus: reservation.status,
+            },
+          },
+        },
+      },
+      include: {
+        extras: true,
+        payments: true,
+        traces: true,
+        package: {
+          include: {
+            coverMedia: true,
+          },
+        },
       },
     });
 
     this.logger.log(`Reservación ${folio} actualizada a PAID`);
 
     await this.syncReservationToGoogleCalendar(folio);
+    await this.sendPaidReservationEmailsFromWebhook(updatedReservation);
   }
 
   private async handlePaymentIntentFailed(
@@ -968,6 +1013,107 @@ export class PaymentsService {
     });
 
     this.logger.log(`Reservación ${folio} actualizada a PROCESSING_PAYMENT`);
+  }
+
+  private async sendPaidReservationEmailsFromWebhook(reservation: any) {
+    try {
+      if (!reservation?.folio) {
+        this.logger.warn(
+          'No se pudo enviar correo automático porque la reserva no tiene folio',
+        );
+        return;
+      }
+
+      if (!reservation.email) {
+        this.logger.warn(
+          `No se envió correo automático para ${reservation.folio} porque no tiene email`,
+        );
+
+        await this.prisma.reservationTrace.create({
+          data: {
+            reservationId: reservation.id,
+            folio: reservation.folio,
+            step: 'PAID_EMAIL_SKIPPED',
+            message: 'Reserva pagada sin email de cliente',
+            metadata: {
+              reason: 'missing_customer_email',
+            },
+          },
+        });
+
+        return;
+      }
+
+      const alreadySent = await this.prisma.reservationEmailLog.findFirst({
+        where: {
+          folio: reservation.folio,
+          type: 'CUSTOMER_RESERVATION_PAID',
+          status: 'SENT',
+        },
+        select: {
+          id: true,
+          createdAt: true,
+        },
+      });
+
+      if (alreadySent) {
+        this.logger.log(
+          `Correo automático omitido para ${reservation.folio}; ya fue enviado previamente`,
+        );
+
+        await this.prisma.reservationTrace.create({
+          data: {
+            reservationId: reservation.id,
+            folio: reservation.folio,
+            step: 'PAID_EMAIL_ALREADY_SENT',
+            message: 'Correo de reserva pagada ya había sido enviado',
+            metadata: {
+              emailLogId: alreadySent.id,
+              sentAt: alreadySent.createdAt,
+            },
+          },
+        });
+
+        return;
+      }
+
+      const emailResult =
+        await this.reservationMailService.sendReservationPaidEmails(reservation);
+
+      this.logger.log(
+        `Correo automático de reserva pagada enviado para ${reservation.folio}`,
+      );
+
+      await this.prisma.reservationTrace.create({
+        data: {
+          reservationId: reservation.id,
+          folio: reservation.folio,
+          step: 'PAID_EMAIL_SENT_FROM_WEBHOOK',
+          message: 'Correo de reserva pagada enviado automáticamente desde webhook',
+          metadata: emailResult as any,
+        },
+      });
+    } catch (error: any) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      this.logger.error(
+        `Error enviando correo automático de reserva pagada para ${reservation?.folio}: ${message}`,
+      );
+
+      if (reservation?.id && reservation?.folio) {
+        await this.prisma.reservationTrace.create({
+          data: {
+            reservationId: reservation.id,
+            folio: reservation.folio,
+            step: 'PAID_EMAIL_FAILED_FROM_WEBHOOK',
+            message: 'Falló el envío automático del correo desde webhook',
+            metadata: {
+              error: message,
+            },
+          },
+        });
+      }
+    }
   }
 
   private async syncReservationToGoogleCalendar(folio: string) {
