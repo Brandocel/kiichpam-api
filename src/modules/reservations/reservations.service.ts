@@ -4,7 +4,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CouponsService } from '../coupons/coupons.service';
 import { CampaignsService } from '../campaigns/campaigns.service';
 import { QuoteDto } from './dto/quote.dto';
 import { ReservationPricingService } from './reservation-pricing.service';
@@ -17,7 +16,6 @@ export class ReservationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly pricingService: ReservationPricingService,
-    private readonly couponsService: CouponsService,
     private readonly campaignsService: CampaignsService,
     private readonly reservationMailService: ReservationMailService,
   ) {}
@@ -44,9 +42,10 @@ export class ReservationsService {
 
   async create(dto: QuoteDto) {
     const calculation = await this.pricingService.calculate(dto);
-    const folio = await this.generateFolio();
 
     const reservation = await this.prisma.$transaction(async (tx) => {
+      const folio = await this.generateFolio(tx);
+
       const created = await tx.reservation.create({
         data: {
           folio,
@@ -105,8 +104,18 @@ export class ReservationsService {
               description: extra.description,
             })),
           },
+
           traces: {
             create: [
+              {
+                folio,
+                step: 'FOLIO_GENERATED',
+                message: 'Folio generated using database sequence',
+                metadata: {
+                  folio,
+                  source: 'reservation_folio_sequences',
+                },
+              },
               {
                 folio,
                 step: 'QUOTE_RESOLVED',
@@ -128,7 +137,16 @@ export class ReservationsService {
       });
 
       if (calculation.couponSummary?.code) {
-        await this.couponsService.incrementUse(calculation.couponSummary.code);
+        await tx.coupon.update({
+          where: {
+            code: calculation.couponSummary.code,
+          },
+          data: {
+            uses: {
+              increment: 1,
+            },
+          },
+        });
       }
 
       if (calculation.appliedCampaignCodes.length > 0) {
@@ -268,7 +286,7 @@ export class ReservationsService {
       this.prisma.reservation.count({
         where,
       }),
-    
+
       this.prisma.reservation.findMany({
         where,
         skip,
@@ -286,14 +304,14 @@ export class ReservationsService {
           },
         },
       }),
-    
+
       this.prisma.reservation.findMany({
         select: {
           status: true,
         },
       }),
     ]);
-    
+
     const byStatus = statusRows.reduce(
       (acc, item) => {
         acc[item.status] = (acc[item.status] ?? 0) + 1;
@@ -541,24 +559,32 @@ export class ReservationsService {
     });
   }
 
-  private async generateFolio() {
+  private async generateFolio(tx: any) {
     const now = new Date();
+
     const year = now.getFullYear().toString().slice(-2);
     const month = `${now.getMonth() + 1}`.padStart(2, '0');
     const day = `${now.getDate()}`.padStart(2, '0');
-    const random = Math.random().toString(36).substring(2, 8).toUpperCase();
 
-    const folio = `RSV-${year}${month}${day}-${random}`;
+    const dateKey = `${year}${month}${day}`;
 
-    const exists = await this.prisma.reservation.findUnique({
-      where: { folio },
-      select: { id: true },
+    const sequence = await tx.reservationFolioSequence.upsert({
+      where: {
+        dateKey,
+      },
+      create: {
+        dateKey,
+        lastValue: 1,
+      },
+      update: {
+        lastValue: {
+          increment: 1,
+        },
+      },
     });
 
-    if (exists) {
-      return this.generateFolio();
-    }
+    const consecutive = String(sequence.lastValue).padStart(5, '0');
 
-    return folio;
+    return `RSV-${dateKey}-${consecutive}`;
   }
 }

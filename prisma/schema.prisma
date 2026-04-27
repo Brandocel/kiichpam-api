@@ -294,17 +294,6 @@ model Reservation {
   @@index([createdAt])
 }
 
-model ReservationFolioSequence {
-  id        String @id @default(uuid())
-  dateKey   String @unique
-  lastValue Int    @default(0)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@map("reservation_folio_sequences")
-}
-
 model ReservationTrace {
   id            String  @id @default(uuid())
   reservationId String
@@ -454,4 +443,14 @@ model ReservationEmailLog {
   @@index([folio])
   @@index([status])
   @@map("reservation_email_logs")
+}
+model ReservationFolioSequence {
+  id        String @id @default(uuid())
+  dateKey   String @unique
+  lastValue Int    @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("reservation_folio_sequences")
 }
