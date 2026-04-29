@@ -10,6 +10,7 @@ import { HeroModule } from './modules/hero/hero.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { ProposalReservationsModule } from './modules/proposal-reservations/proposal-reservations.module';
 import { CampaignsModule } from './modules/campaigns/campaigns.module';
+import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { CampaignsModule } from './modules/campaigns/campaigns.module';
     PaymentsModule,
     ProposalReservationsModule,
     CampaignsModule,
+    WhatsappModule,
   ],
 })
 export class AppModule {}
