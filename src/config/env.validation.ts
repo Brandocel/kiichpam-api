@@ -25,15 +25,46 @@ class EnvVars {
   @IsString()
   @IsOptional()
   CORS_ORIGIN?: string;
+
+  @IsString()
+  @IsNotEmpty()
+  WHATSAPP_TOKEN!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  WHATSAPP_PHONE_NUMBER_ID!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  WHATSAPP_BUSINESS_ACCOUNT_ID!: string;
+
+  @IsString()
+  @IsOptional()
+  WHATSAPP_API_VERSION?: string;
+
+  @IsString()
+  @IsNotEmpty()
+  WHATSAPP_VERIFY_TOKEN!: string;
+
+  @IsString()
+  @IsOptional()
+  GEMINI_API_KEY?: string;
 }
 
 export function validateEnv(config: Record<string, unknown>) {
-  const validated = plainToInstance(EnvVars, config, { enableImplicitConversion: true });
-  const errors = validateSync(validated, { skipMissingProperties: false });
+  const validated = plainToInstance(EnvVars, config, {
+    enableImplicitConversion: true,
+  });
+
+  const errors = validateSync(validated, {
+    skipMissingProperties: false,
+  });
 
   if (errors.length > 0) {
     throw new Error(
-      `ENV validation error:\n${errors.map((e) => JSON.stringify(e.constraints)).join('\n')}`,
+      `ENV validation error:\n${errors
+        .map((e) => JSON.stringify(e.constraints))
+        .join('\n')}`,
     );
   }
 

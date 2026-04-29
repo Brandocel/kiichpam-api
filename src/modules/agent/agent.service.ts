@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AiService } from '../ai/ai.service';
 import { AgentMemoryService } from './memory/agent-memory.service';
 import {
   AgentChatInput,
@@ -14,12 +15,11 @@ export class AgentService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly memoryService: AgentMemoryService,
+    private readonly aiService: AiService,
   ) {}
 
   async chat(input: AgentChatInput): Promise<AgentChatResponse> {
-    const lang = input.lang ?? 'es';
     const message = input.message.trim();
-
     const intent = this.detectIntent(message);
 
     this.memoryService.update(input.sessionId, {
@@ -31,69 +31,43 @@ export class AgentService {
       `Agent message | channel=${input.channel} session=${input.sessionId} intent=${intent}`,
     );
 
-    switch (intent) {
-      case 'GREETING':
-        return {
-          intent,
-          handoffRequired: false,
-          reply:
-            lang === 'en'
-              ? 'Hello! Welcome to Ki’ichpam. I can help you with packages, promotions, prices, and reservations.'
-              : '¡Hola! Bienvenido a Ki’ichpam. Puedo ayudarte con paquetes, promociones, precios y reservas. ¿Qué te gustaría conocer?',
-        };
-
-      case 'PACKAGE_INFO':
-        return this.getPackagesReply(lang, intent);
-
-      case 'CAMPAIGN_INFO':
-        return this.getCampaignsReply(lang, intent);
-
-      case 'QUOTE_REQUEST':
-        return {
-          intent,
-          handoffRequired: false,
-          reply:
-            'Con gusto te ayudo a cotizar. Para darte un precio correcto, dime por favor: fecha de visita, cuántos adultos, niños e infantes asistirán.',
-        };
-
-      case 'RESERVATION_REQUEST':
-        return {
-          intent,
-          handoffRequired: false,
-          reply:
-            'Perfecto, te ayudo con tu reserva. Para comenzar necesito: paquete, fecha de visita, número de adultos, niños e infantes.',
-        };
-
-      case 'HUMAN_HANDOFF':
-        return {
-          intent,
-          handoffRequired: true,
-          reply:
-            'Claro, te voy a canalizar con una persona del equipo para ayudarte mejor. Por favor espera un momento.',
-        };
-
-      default:
-        return {
-          intent,
-          handoffRequired: false,
-          reply:
-            'Puedo ayudarte con información de paquetes, promociones, precios o reservas. Puedes escribirme por ejemplo: “paquetes”, “promociones” o “quiero reservar”.',
-        };
+    if (this.mustHandoff(message)) {
+      return {
+        intent: 'HUMAN_HANDOFF',
+        handoffRequired: true,
+        reply:
+          'Claro, te canalizo con una persona del equipo para apoyarte mejor. Por favor espera un momento.',
+      };
     }
+
+    const businessContext = await this.buildBusinessContext();
+    const conversationMemory = this.buildConversationMemory(input.sessionId);
+
+    const reply = await this.aiService.generateCustomerReply({
+      customerMessage: message,
+      businessContext,
+      conversationMemory,
+    });
+
+    return {
+      intent,
+      handoffRequired: false,
+      reply,
+    };
   }
 
   private detectIntent(message: string): AgentIntent {
-    const text = message.toLowerCase();
+    const text = this.normalizeText(message);
 
     if (
       this.includesAny(text, [
         'hola',
         'buenas',
-        'buen día',
         'buen dia',
         'buenas tardes',
         'hello',
         'hi',
+        'que tal',
       ])
     ) {
       return 'GREETING';
@@ -103,12 +77,18 @@ export class AgentService {
       this.includesAny(text, [
         'paquete',
         'paquetes',
+        'paqute',
+        'paqutes',
+        'paqueteria',
         'tour',
         'tours',
         'info',
-        'información',
         'informacion',
         'incluye',
+        'recomiendas',
+        'recomiendas',
+        'recomendacion',
+        'opciones',
       ])
     ) {
       return 'PACKAGE_INFO';
@@ -117,12 +97,13 @@ export class AgentService {
     if (
       this.includesAny(text, [
         'promo',
-        'promoción',
         'promocion',
+        'promociones',
         'descuento',
-        'campaña',
         'campana',
+        'campaña',
         'oferta',
+        '2x1',
       ])
     ) {
       return 'CAMPAIGN_INFO';
@@ -131,12 +112,13 @@ export class AgentService {
     if (
       this.includesAny(text, [
         'precio',
+        'precios',
         'cuesta',
         'cotizar',
-        'cotización',
         'cotizacion',
-        'cuánto',
         'cuanto',
+        'cuanto cuesta',
+        'total',
       ])
     ) {
       return 'QUOTE_REQUEST';
@@ -149,176 +131,186 @@ export class AgentService {
         'apartar',
         'quiero ir',
         'agendar',
+        'mañana',
+        'manana',
+        'adultos',
+        'ninos',
+        'niños',
+        'infantes',
       ])
     ) {
       return 'RESERVATION_REQUEST';
     }
 
-    if (
-      this.includesAny(text, [
-        'humano',
-        'persona',
-        'asesor',
-        'alguien',
-        'queja',
-        'reembolso',
-        'cancelar',
-        'cancelación',
-        'cancelacion',
-        'problema',
-      ])
-    ) {
+    if (this.mustHandoff(text)) {
       return 'HUMAN_HANDOFF';
     }
 
     return 'UNKNOWN';
   }
 
-  private includesAny(text: string, words: string[]): boolean {
-    return words.some((word) => text.includes(word));
-  }
-
-  private async getPackagesReply(
-    lang: 'es' | 'en',
-    intent: AgentIntent,
-  ): Promise<AgentChatResponse> {
-    const packages = await this.prisma.package.findMany({
-      where: {
-        isActive: true,
-      },
-      include: {
-        translations: true,
-        extras: {
-          where: {
-            isActive: true,
-          },
-          include: {
-            translations: true,
-          },
+  private async buildBusinessContext(): Promise<string> {
+    const [packages, campaigns] = await Promise.all([
+      this.prisma.package.findMany({
+        where: {
+          isActive: true,
         },
-      },
-      orderBy: {
-        createdAt: 'asc',
-      },
-      take: 10,
-    });
-
-    if (!packages.length) {
-      return {
-        intent,
-        handoffRequired: false,
-        reply:
-          'Por el momento no tengo paquetes activos disponibles. Puedo canalizarte con un asesor para ayudarte.',
-      };
-    }
-
-    const lines = packages.map((pkg, index) => {
-      const translation =
-        pkg.translations.find((item) => item.lang === lang) ??
-        pkg.translations.find((item) => item.lang === 'es') ??
-        pkg.translations[0];
-
-      const name = translation?.name ?? pkg.code;
-
-      return `${index + 1}. ${name}
-Adulto: $${pkg.adultPriceMXN} MXN
-Niño: $${pkg.childPriceMXN} MXN
-Infante: $${pkg.infantPriceMXN} MXN`;
-    });
-
-    return {
-      intent,
-      handoffRequired: false,
-      reply: `Estos son nuestros paquetes disponibles:\n\n${lines.join(
-        '\n\n',
-      )}\n\n¿Te gustaría que te ayude a cotizar o reservar alguno?`,
-    };
-  }
-
-  private async getCampaignsReply(
-    lang: 'es' | 'en',
-    intent: AgentIntent,
-  ): Promise<AgentChatResponse> {
-    const now = new Date();
-
-    const campaigns = await this.prisma.campaign.findMany({
-      where: {
-        isActive: true,
-        status: 'ACTIVE',
-        OR: [
-          {
-            startAt: null,
-          },
-          {
-            startAt: {
-              lte: now,
+        include: {
+          translations: true,
+          extras: {
+            where: {
+              isActive: true,
+            },
+            include: {
+              translations: true,
             },
           },
-        ],
-        AND: [
+        },
+        orderBy: {
+          createdAt: 'asc',
+        },
+        take: 10,
+      }),
+      this.prisma.campaign.findMany({
+        where: {
+          isActive: true,
+          status: 'ACTIVE',
+        },
+        include: {
+          translations: true,
+          package: {
+            include: {
+              translations: true,
+            },
+          },
+        },
+        orderBy: [
           {
-            OR: [
-              {
-                endAt: null,
-              },
-              {
-                endAt: {
-                  gte: now,
-                },
-              },
-            ],
+            priority: 'desc',
+          },
+          {
+            createdAt: 'desc',
           },
         ],
-      },
-      include: {
-        translations: true,
-        package: {
-          include: {
-            translations: true,
-          },
-        },
-      },
-      orderBy: [
-        {
-          priority: 'desc',
-        },
-        {
-          createdAt: 'desc',
-        },
-      ],
-      take: 10,
-    });
+        take: 10,
+      }),
+    ]);
 
-    if (!campaigns.length) {
-      return {
-        intent,
-        handoffRequired: false,
-        reply:
-          'Por ahora no tengo promociones activas registradas. Si quieres, puedo ayudarte a revisar los paquetes disponibles.',
-      };
+    const packageContext = packages.length
+      ? packages
+          .map((pkg, index) => {
+            const translation =
+              pkg.translations.find((item) => item.lang === 'es') ??
+              pkg.translations[0];
+
+            const extras = pkg.extras
+              .map((extra) => {
+                const extraTranslation =
+                  extra.translations.find((item) => item.lang === 'es') ??
+                  extra.translations[0];
+
+                return `- ${extraTranslation?.name ?? extra.code}: Precio $${extra.priceMXN} MXN`;
+              })
+              .join('\n');
+
+            return `
+Paquete ${index + 1}:
+Nombre: ${translation?.name ?? pkg.code}
+Código: ${pkg.code}
+Precio adulto: $${pkg.adultPriceMXN} MXN
+Precio niño: $${pkg.childPriceMXN} MXN
+Precio infante: $${pkg.infantPriceMXN} MXN
+Descripción: ${translation?.description ?? 'Sin descripción disponible'}
+Incluye: ${translation?.includes ?? 'No especificado'}
+No incluye: ${translation?.excludes ?? 'No especificado'}
+Extras activos:
+${extras || 'Sin extras activos'}
+`;
+          })
+          .join('\n')
+      : 'No hay paquetes activos registrados.';
+
+    const campaignContext = campaigns.length
+      ? campaigns
+          .map((campaign, index) => {
+            const translation =
+              campaign.translations.find((item) => item.lang === 'es') ??
+              campaign.translations[0];
+
+            return `
+Campaña ${index + 1}:
+Nombre: ${translation?.promoName ?? campaign.name}
+Descripción: ${translation?.promoDescription ?? campaign.description ?? 'Sin descripción'}
+Código interno: ${campaign.code}
+Estado: ${campaign.status}
+`;
+          })
+          .join('\n')
+      : 'No hay campañas activas registradas.';
+
+    return `
+PAQUETES ACTIVOS:
+${packageContext}
+
+CAMPAÑAS ACTIVAS:
+${campaignContext}
+
+POLÍTICAS BASE:
+- Para cotizar correctamente pide fecha de visita, paquete, adultos, niños e infantes.
+- No confirmar una reserva como creada si no se ejecutó el endpoint de reservas.
+- Si el cliente pregunta por disponibilidad exacta, pedir fecha y canalizar validación.
+- Si el cliente pide pago, reembolso, cancelación o cambio especial, canalizar con asesor humano.
+`;
+  }
+
+  private buildConversationMemory(sessionId: string): string {
+    const memory = this.memoryService.get(sessionId);
+
+    if (!memory) {
+      return 'Sin memoria previa.';
     }
 
-    const lines = campaigns.map((campaign, index) => {
-      const translation =
-        campaign.translations.find((item) => item.lang === lang) ??
-        campaign.translations.find((item) => item.lang === 'es') ??
-        campaign.translations[0];
+    return `
+Última intención: ${memory.lastIntent ?? 'N/A'}
+Último mensaje: ${memory.lastMessage ?? 'N/A'}
+Paquete detectado: ${memory.packageCode ?? 'N/A'}
+Fecha detectada: ${memory.visitDate ?? 'N/A'}
+Adultos: ${memory.adults ?? 'N/A'}
+Niños: ${memory.children ?? 'N/A'}
+Infantes: ${memory.infants ?? 'N/A'}
+`;
+  }
 
-      const promoName = translation?.promoName ?? campaign.name;
-      const promoDescription =
-        translation?.promoDescription ?? campaign.description ?? '';
+  private mustHandoff(message: string): boolean {
+    const text = this.normalizeText(message);
 
-      return `${index + 1}. ${promoName}${
-        promoDescription ? `\n${promoDescription}` : ''
-      }`;
-    });
+    return this.includesAny(text, [
+      'humano',
+      'persona',
+      'asesor',
+      'ejecutivo',
+      'alguien',
+      'queja',
+      'reembolso',
+      'devolucion',
+      'cancelar',
+      'cancelacion',
+      'problema de pago',
+      'pago fallido',
+      'molesto',
+      'demanda',
+    ]);
+  }
 
-    return {
-      intent,
-      handoffRequired: false,
-      reply: `Estas son las promociones activas:\n\n${lines.join(
-        '\n\n',
-      )}\n\nPuedo ayudarte a cotizar con la promoción disponible.`,
-    };
+  private includesAny(text: string, words: string[]): boolean {
+    return words.some((word) => text.includes(this.normalizeText(word)));
+  }
+
+  private normalizeText(text: string): string {
+    return text
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim();
   }
 }

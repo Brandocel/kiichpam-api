@@ -13,6 +13,7 @@ import { CampaignsModule } from './modules/campaigns/campaigns.module';
 import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
 import { LegalModule } from './modules/legal/legal.module';
 import { AgentModule } from './modules/agent/agent.module';
+import { AiModule } from './modules/ai/ai.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { AgentModule } from './modules/agent/agent.module';
     WhatsappModule,
     LegalModule,
     AgentModule,
+    AiModule,
   ],
 })
 export class AppModule {}
