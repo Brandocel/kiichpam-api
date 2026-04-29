@@ -26,7 +26,7 @@ export class AiService {
     const apiKey = this.configService.get<string>('GEMINI_API_KEY');
 
     if (!apiKey) {
-      this.logger.warn('Missing GEMINI_API_KEY. Using fallback response.');
+      this.logger.warn('Missing GEMINI_API_KEY. Using safe fallback response.');
       return this.getFallbackReply();
     }
 
@@ -34,20 +34,16 @@ export class AiService {
 
     try {
       const response = await axios.post<GeminiGenerateContentResponse>(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
         {
           contents: [
             {
               role: 'user',
-              parts: [
-                {
-                  text: prompt,
-                },
-              ],
+              parts: [{ text: prompt }],
             },
           ],
           generationConfig: {
-            temperature: 0.35,
+            temperature: 0.25,
             topP: 0.8,
             topK: 40,
             maxOutputTokens: 450,
@@ -98,14 +94,16 @@ Tu objetivo:
 Reglas estrictas:
 1. Responde siempre en español.
 2. No inventes precios, promociones, horarios, disponibilidad ni políticas.
-3. Si el cliente pregunta por precios, usa únicamente los precios del contexto.
-4. Si falta información para cotizar, pide los datos faltantes.
-5. No pidas datos bancarios.
-6. No muestres información técnica, tokens, IDs internos, errores del sistema ni detalles de la API.
-7. Si el cliente pide cancelación, reembolso, queja, problema de pago o algo delicado, indica que será canalizado con un asesor humano.
-8. Mantén respuestas listas para WhatsApp: cortas, claras y con saltos de línea útiles.
-9. No uses markdown pesado. No uses tablas.
-10. Cierra con una pregunta útil para avanzar la venta.
+3. Si el cliente pregunta por precios, usa únicamente los precios del contexto real disponible.
+4. Si el cliente pregunta por paquetes, usa únicamente los paquetes del contexto real disponible.
+5. Si falta información para cotizar, pide solo los datos faltantes.
+6. No pidas datos bancarios.
+7. No muestres información técnica, tokens, IDs internos, errores del sistema ni detalles de la API.
+8. Si el cliente pide cancelación, reembolso, queja, problema de pago o algo delicado, indica que será canalizado con un asesor humano.
+9. Mantén respuestas listas para WhatsApp: cortas, claras y con saltos de línea útiles.
+10. No uses markdown pesado. No uses tablas.
+11. No digas “según el contexto”.
+12. Cierra con una pregunta útil para avanzar la venta.
 
 Contexto real disponible:
 ${params.businessContext}
@@ -124,10 +122,11 @@ Respuesta:
     return reply
       .replace(/\*\*/g, '')
       .replace(/```/g, '')
+      .replace(/^Respuesta:\s*/i, '')
       .trim();
   }
 
   private getFallbackReply(): string {
-    return 'Gracias por escribirnos. Puedo ayudarte con paquetes, promociones, precios o reservas. ¿Qué te gustaría consultar?';
+    return 'Gracias por escribirnos. En este momento estoy teniendo alta demanda para generar una respuesta detallada. Puedo ayudarte con paquetes, promociones, precios o reservas. ¿Qué te gustaría consultar?';
   }
 }
