@@ -12,6 +12,7 @@ import { ProposalReservationsModule } from './modules/proposal-reservations/prop
 import { CampaignsModule } from './modules/campaigns/campaigns.module';
 import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
 import { LegalModule } from './modules/legal/legal.module';
+import { AgentModule } from './modules/agent/agent.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { LegalModule } from './modules/legal/legal.module';
     CampaignsModule,
     WhatsappModule,
     LegalModule,
+    AgentModule,
   ],
 })
 export class AppModule {}

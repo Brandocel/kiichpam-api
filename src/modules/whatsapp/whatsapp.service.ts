@@ -1,17 +1,19 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios, { AxiosError } from 'axios';
+import { AgentService } from '../agent/agent.service';
 import { WhatsappWebhookDto } from './dto/whatsapp-webhook.dto';
-import {
-  WhatsappSendMessageResponse,
-} from './interfaces/whatsapp-message.interface';
+import { WhatsappSendMessageResponse } from './interfaces/whatsapp-message.interface';
 import { parseWhatsappWebhookMessage } from './utils/whatsapp-message-parser';
 
 @Injectable()
 export class WhatsappService {
   private readonly logger = new Logger(WhatsappService.name);
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly agentService: AgentService,
+  ) {}
 
   async handleIncomingWebhook(body: WhatsappWebhookDto): Promise<void> {
     const parsedMessage = parseWhatsappWebhookMessage(body);
@@ -25,12 +27,16 @@ export class WhatsappService {
       `Incoming WhatsApp message from ${parsedMessage.from}: ${parsedMessage.text}`,
     );
 
+    const agentResponse = await this.agentService.chat({
+      channel: 'whatsapp',
+      sessionId: parsedMessage.from,
+      message: parsedMessage.text,
+      lang: 'es',
+    });
+
     const to = this.normalizeTestRecipientPhone(parsedMessage.from);
 
-    await this.sendTextMessage(
-      to,
-      '¡Hola! Soy el asistente de Ki’ichpam. Recibí tu mensaje correctamente. En breve podré ayudarte con paquetes, promociones y reservas.',
-    );
+    await this.sendTextMessage(to, agentResponse.reply);
   }
 
   private normalizeTestRecipientPhone(phone: string): string {
