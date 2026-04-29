@@ -54,7 +54,9 @@ export class WhatsappService {
     const phoneNumberId = this.configService.get<string>(
       'WHATSAPP_PHONE_NUMBER_ID',
     );
+
     const token = this.configService.get<string>('WHATSAPP_TOKEN');
+
     const apiVersion =
       this.configService.get<string>('WHATSAPP_API_VERSION') || 'v23.0';
 
