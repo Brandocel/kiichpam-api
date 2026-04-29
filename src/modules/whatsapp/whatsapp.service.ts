@@ -3,7 +3,6 @@ import { ConfigService } from '@nestjs/config';
 import axios, { AxiosError } from 'axios';
 import { WhatsappWebhookDto } from './dto/whatsapp-webhook.dto';
 import {
-  ParsedWhatsappMessage,
   WhatsappSendMessageResponse,
 } from './interfaces/whatsapp-message.interface';
 import { parseWhatsappWebhookMessage } from './utils/whatsapp-message-parser';
@@ -26,26 +25,20 @@ export class WhatsappService {
       `Incoming WhatsApp message from ${parsedMessage.from}: ${parsedMessage.text}`,
     );
 
-    /**
-     * Aquí todavía NO metemos IA.
-     * Primero dejamos WhatsApp limpio y escalable.
-     *
-     * Después aquí conectaremos:
-     *
-     * const agentResponse = await this.agentService.chat({
-     *   channel: 'whatsapp',
-     *   sessionId: parsedMessage.from,
-     *   message: parsedMessage.text,
-     *   lang: 'es',
-     * });
-     *
-     * await this.sendTextMessage(parsedMessage.from, agentResponse.reply);
-     */
+    const to = this.normalizeTestRecipientPhone(parsedMessage.from);
 
     await this.sendTextMessage(
-      parsedMessage.from,
+      to,
       '¡Hola! Soy el asistente de Ki’ichpam. Recibí tu mensaje correctamente. En breve podré ayudarte con paquetes, promociones y reservas.',
     );
+  }
+
+  private normalizeTestRecipientPhone(phone: string): string {
+    if (phone.startsWith('521')) {
+      return `52${phone.substring(3)}`;
+    }
+
+    return phone;
   }
 
   async sendTextMessage(
@@ -92,11 +85,11 @@ export class WhatsappService {
 
       return response.data;
     } catch (error) {
-      const axiosError = error as AxiosError;
+      const axiosError = error as AxiosError<any>;
 
       this.logger.error(
         'Error sending WhatsApp message',
-        axiosError.response?.data || axiosError.message,
+        JSON.stringify(axiosError.response?.data || axiosError.message, null, 2),
       );
 
       throw error;
