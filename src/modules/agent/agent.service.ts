@@ -1,6 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
+import {
+  AgentMessageDirection,
+  AgentMessageSender,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AiService } from '../ai/ai.service';
+import { AgentConversationService } from './conversations/agent-conversation.service';
+import { IntentClassifierService } from './intents/intent-classifier.service';
 import { AgentMemoryService } from './memory/agent-memory.service';
 import {
   AgentChatInput,
@@ -38,52 +44,139 @@ export class AgentService {
     private readonly prisma: PrismaService,
     private readonly memoryService: AgentMemoryService,
     private readonly aiService: AiService,
+    private readonly conversationService: AgentConversationService,
+    private readonly intentClassifier: IntentClassifierService,
   ) {}
 
   async chat(input: AgentChatInput): Promise<AgentChatResponse> {
     const message = input.message.trim();
-    const intent = this.detectIntent(message);
 
-    this.memoryService.update(input.sessionId, {
-      lastIntent: intent,
-      lastMessage: message,
-      ...this.extractMemoryFromMessage(message),
+    await this.conversationService.getOrCreate({
+      sessionId: input.sessionId,
+      channel: input.channel,
     });
 
-    this.logger.log(
-      `Agent message | channel=${input.channel} session=${input.sessionId} intent=${intent}`,
+    await this.conversationService.addMessage({
+      sessionId: input.sessionId,
+      sender: AgentMessageSender.CUSTOMER,
+      channel: input.channel,
+      direction: AgentMessageDirection.INBOUND,
+      message,
+    });
+
+    const isHumanMode = await this.conversationService.isHumanMode(
+      input.sessionId,
     );
 
-    if (this.mustHandoff(message)) {
+    if (isHumanMode) {
       return {
         intent: 'HUMAN_HANDOFF',
         handoffRequired: true,
-        reply:
-          'Claro, te canalizo con una persona del equipo para apoyarte mejor. Por favor espera un momento.',
+        reply: '',
+      };
+    }
+
+    const classification = this.intentClassifier.classify(message);
+    const extractedMemory = this.extractMemoryFromMessage(message);
+
+    await this.conversationService.updateContext(input.sessionId, {
+      lastIntent: classification.intent,
+      lastIntentScore: classification.score,
+      lastMessage: message,
+      matchedWords: classification.matchedWords,
+      packageCode: classification.packageCode ?? extractedMemory.packageCode,
+      visitDate: extractedMemory.visitDate,
+      adults: extractedMemory.adults,
+      children: extractedMemory.children,
+      infants: extractedMemory.infants,
+    });
+
+    this.memoryService.update(input.sessionId, {
+      lastIntent: classification.intent,
+      lastIntentScore: classification.score,
+      lastMessage: message,
+      matchedWords: classification.matchedWords,
+      packageCode: classification.packageCode ?? extractedMemory.packageCode,
+      visitDate: extractedMemory.visitDate,
+      adults: extractedMemory.adults,
+      children: extractedMemory.children,
+      infants: extractedMemory.infants,
+    });
+
+    this.logger.log(
+      `Agent message | channel=${input.channel} session=${input.sessionId} intent=${classification.intent} score=${classification.score}`,
+    );
+
+    if (classification.intent === 'HUMAN_HANDOFF' || this.mustHandoff(message)) {
+      await this.conversationService.takeHumanControl(input.sessionId);
+
+      const reply =
+        'Claro, te canalizo con una persona del equipo para apoyarte mejor. Por favor espera un momento.';
+
+      await this.saveBotReply({
+        input,
+        reply,
+        intent: 'HUMAN_HANDOFF',
+        intentScore: classification.score,
+        packageCode: classification.packageCode,
+      });
+
+      return {
+        intent: 'HUMAN_HANDOFF',
+        handoffRequired: true,
+        reply,
+      };
+    }
+
+    if (classification.shouldAskClarification) {
+      const reply = this.replyClarification();
+
+      await this.saveBotReply({
+        input,
+        reply,
+        intent: classification.intent,
+        intentScore: classification.score,
+        packageCode: classification.packageCode,
+      });
+
+      return {
+        intent: classification.intent,
+        handoffRequired: false,
+        reply,
       };
     }
 
     const dataContext = await this.buildStructuredContext();
-    const memory = this.memoryService.get(input.sessionId);
 
     const quickReply = this.getQuickReply({
       message,
-      intent,
+      intent: classification.intent,
       packages: dataContext.packages,
       campaigns: dataContext.campaigns,
       sessionId: input.sessionId,
     });
 
-    if (quickReply) {
+    if (quickReply && classification.score >= 0.8) {
+      await this.saveBotReply({
+        input,
+        reply: quickReply,
+        intent: classification.intent,
+        intentScore: classification.score,
+        packageCode: classification.packageCode,
+      });
+
       return {
-        intent,
+        intent: classification.intent,
         handoffRequired: false,
         reply: quickReply,
       };
     }
 
     const businessContext = this.buildBusinessContextText(dataContext);
-    const conversationMemory = this.buildConversationMemory(input.sessionId);
+
+    const conversationMemory = await this.conversationService.getMemoryText(
+      input.sessionId,
+    );
 
     const reply = await this.aiService.generateCustomerReply({
       customerMessage: message,
@@ -91,11 +184,48 @@ export class AgentService {
       conversationMemory,
     });
 
+    await this.saveBotReply({
+      input,
+      reply,
+      intent: classification.intent,
+      intentScore: classification.score,
+      packageCode: classification.packageCode,
+    });
+
     return {
-      intent,
+      intent: classification.intent,
       handoffRequired: false,
       reply,
     };
+  }
+
+  async takeHumanControl(sessionId: string, agentId?: string) {
+    return this.conversationService.takeHumanControl(sessionId, agentId);
+  }
+
+  async releaseHumanControl(sessionId: string) {
+    return this.conversationService.releaseHumanControl(sessionId);
+  }
+
+  private async saveBotReply(params: {
+    input: AgentChatInput;
+    reply: string;
+    intent: AgentIntent;
+    intentScore?: number;
+    packageCode?: string;
+  }) {
+    if (!params.reply.trim()) return;
+
+    await this.conversationService.addMessage({
+      sessionId: params.input.sessionId,
+      sender: AgentMessageSender.BOT,
+      channel: params.input.channel,
+      direction: AgentMessageDirection.OUTBOUND,
+      message: params.reply,
+      intent: params.intent,
+      intentScore: params.intentScore,
+      packageCode: params.packageCode,
+    });
   }
 
   private getQuickReply(params: {
@@ -109,10 +239,6 @@ export class AgentService {
 
     if (params.intent === 'GREETING') {
       return this.replyGreeting();
-    }
-
-    if (this.isPackageListRequest(text)) {
-      return this.replyPackageList(params.packages);
     }
 
     const detectedPackageCode = this.detectPackageCode(text);
@@ -133,6 +259,10 @@ export class AgentService {
       });
 
       return this.replyPackagePrices(params.packages, detectedPackageCode);
+    }
+
+    if (this.isPackageListRequest(text)) {
+      return this.replyPackageList(params.packages);
     }
 
     if (this.isPriceRequest(text)) {
@@ -168,15 +298,19 @@ Puedo ayudarte con:
 ¿Te gustaría conocer los paquetes o prefieres que te cotice directo?`;
   }
 
+  private replyClarification(): string {
+    return `Con gusto te ayudo.
+
+Para orientarte mejor, ¿quieres información sobre paquetes, precios o deseas hacer una cotización?`;
+  }
+
   private replyPackageList(packages: PackageContextItem[]): string {
     if (!packages.length) {
       return 'Por el momento no tengo paquetes activos disponibles. Te canalizo con un asesor para apoyarte mejor.';
     }
 
     const lines = packages
-      .map((pkg) => {
-        return `* ${pkg.name}: ${pkg.description}`;
-      })
+      .map((pkg) => `* ${pkg.name}: ${pkg.description}`)
       .join('\n');
 
     return `Tenemos estas opciones disponibles:
@@ -271,9 +405,7 @@ Infantes: 0 a 4 años.
     }
 
     const lines = campaigns
-      .map((campaign) => {
-        return `* ${campaign.name}: ${campaign.description}`;
-      })
+      .map((campaign) => `* ${campaign.name}: ${campaign.description}`)
       .join('\n');
 
     return `Tenemos estas promociones activas:
@@ -439,124 +571,6 @@ POLÍTICAS BASE:
 `;
   }
 
-  private detectIntent(message: string): AgentIntent {
-    const text = this.normalizeText(message);
-
-    if (
-      this.includesAny(text, [
-        'hola',
-        'buenas',
-        'buen dia',
-        'buenas tardes',
-        'hello',
-        'hi',
-        'que tal',
-      ])
-    ) {
-      return 'GREETING';
-    }
-
-    if (
-      this.includesAny(text, [
-        'paquete',
-        'paquetes',
-        'paqute',
-        'paqutes',
-        'tour',
-        'tours',
-        'info',
-        'informacion',
-        'incluye',
-        'recomiendas',
-        'recomendacion',
-        'opciones',
-        'detalle',
-        'detalles',
-        'basico',
-        'basic',
-        'plus',
-        'total',
-        'todo incluido',
-      ])
-    ) {
-      return 'PACKAGE_INFO';
-    }
-
-    if (
-      this.includesAny(text, [
-        'promo',
-        'promocion',
-        'promociones',
-        'descuento',
-        'campana',
-        'campaña',
-        'oferta',
-        '2x1',
-      ])
-    ) {
-      return 'CAMPAIGN_INFO';
-    }
-
-    if (
-      this.includesAny(text, [
-        'precio',
-        'precios',
-        'cuesta',
-        'costo',
-        'costos',
-        'cotizar',
-        'cotizacion',
-        'cuanto',
-        'cuanto cuesta',
-        'total',
-      ])
-    ) {
-      return 'QUOTE_REQUEST';
-    }
-
-    if (
-      this.includesAny(text, [
-        'reservar',
-        'reserva',
-        'apartar',
-        'quiero ir',
-        'agendar',
-        'mañana',
-        'manana',
-        'adultos',
-        'ninos',
-        'niños',
-        'infantes',
-      ])
-    ) {
-      return 'RESERVATION_REQUEST';
-    }
-
-    if (this.mustHandoff(text)) {
-      return 'HUMAN_HANDOFF';
-    }
-
-    return 'UNKNOWN';
-  }
-
-  private buildConversationMemory(sessionId: string): string {
-    const memory = this.memoryService.get(sessionId);
-
-    if (!memory) {
-      return 'Sin memoria previa.';
-    }
-
-    return `
-Última intención: ${memory.lastIntent ?? 'N/A'}
-Último mensaje: ${memory.lastMessage ?? 'N/A'}
-Paquete detectado: ${memory.packageCode ?? 'N/A'}
-Fecha detectada: ${memory.visitDate ?? 'N/A'}
-Adultos: ${memory.adults ?? 'N/A'}
-Niños: ${memory.children ?? 'N/A'}
-Infantes: ${memory.infants ?? 'N/A'}
-`;
-  }
-
   private extractMemoryFromMessage(
     message: string,
   ): Partial<{
@@ -706,6 +720,8 @@ Infantes: ${memory.infants ?? 'N/A'}
         'kx basic',
         'sencillo',
         'entrada basica',
+        'vasico',
+        'vásico',
       ])
     ) {
       return 'KX_BASIC';
@@ -714,10 +730,12 @@ Infantes: ${memory.infants ?? 'N/A'}
     if (
       this.includesAny(normalized, [
         'plus',
+        'pluz',
         'kx plus',
         'con comida',
         'con alimentos',
         'buffet',
+        'bufet',
       ])
     ) {
       return 'KX_PLUS';
@@ -731,6 +749,7 @@ Infantes: ${memory.infants ?? 'N/A'}
         'todo incluído',
         'completo',
         'dos cenotes',
+        'full',
       ])
     ) {
       return 'KX_TOTAL';
@@ -864,6 +883,8 @@ Infantes: ${memory.infants ?? 'N/A'}
       .toLowerCase()
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[¿?¡!.,;:()"]/g, ' ')
+      .replace(/\s+/g, ' ')
       .trim();
   }
 }

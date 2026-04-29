@@ -393,7 +393,7 @@ model MediaAsset {
   url          String
   isActive     Boolean   @default(true)
 
-  data         Bytes?
+  data Bytes?
 
   packageCoverOf     Package[]             @relation("PackageCover")
   campaignCoverOf    CampaignTranslation[] @relation("CampaignCover")
@@ -424,14 +424,14 @@ model HeroCarouselSlide {
 }
 
 model ReservationEmailLog {
-  id            String   @id @default(uuid())
+  id            String  @id @default(uuid())
   reservationId String
   folio         String
   type          String
   to            String
   subject       String
-  status        String   @default("PENDING")
-  provider      String   @default("RESEND")
+  status        String  @default("PENDING")
+  provider      String  @default("RESEND")
   providerId    String?
   error         String?
   metadata      Json?
@@ -444,6 +444,7 @@ model ReservationEmailLog {
   @@index([status])
   @@map("reservation_email_logs")
 }
+
 model ReservationFolioSequence {
   id        String @id @default(uuid())
   dateKey   String @unique
@@ -453,4 +454,103 @@ model ReservationFolioSequence {
   updatedAt DateTime @updatedAt
 
   @@map("reservation_folio_sequences")
+}
+
+enum AgentConversationStatus {
+  BOT_ACTIVE
+  HUMAN_ACTIVE
+  CLOSED
+}
+
+enum AgentMessageSender {
+  CUSTOMER
+  BOT
+  HUMAN
+  SYSTEM
+}
+
+enum AgentMessageChannel {
+  WHATSAPP
+  WEB
+}
+
+enum AgentMessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+model AgentConversation {
+  id        String @id @default(uuid())
+  sessionId String @unique
+
+  channel AgentMessageChannel     @default(WHATSAPP)
+  status  AgentConversationStatus @default(BOT_ACTIVE)
+
+  botEnabled Boolean @default(true)
+  humanMode  Boolean @default(false)
+
+  assignedTo String?
+  assignedAt DateTime?
+
+  lastIntent      String?
+  lastIntentScore Float?
+  lastMessage     String?
+  matchedWords    Json?
+
+  packageCode String?
+  visitDate   String?
+  adults      Int?
+  children    Int?
+  infants     Int?
+
+  customerName  String?
+  customerEmail String?
+  customerPhone String?
+
+  lastCustomerAt DateTime?
+  lastBotAt      DateTime?
+  lastHumanAt    DateTime?
+
+  metadata Json?
+
+  messages AgentConversationMessage[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sessionId])
+  @@index([status])
+  @@index([botEnabled])
+  @@index([humanMode])
+  @@index([packageCode])
+  @@index([lastCustomerAt])
+  @@map("agent_conversations")
+}
+
+model AgentConversationMessage {
+  id             String @id @default(uuid())
+  conversationId String
+
+  sender    AgentMessageSender
+  channel   AgentMessageChannel   @default(WHATSAPP)
+  direction AgentMessageDirection
+
+  message String
+
+  intent      String?
+  intentScore Float?
+
+  packageCode String?
+  metadata    Json?
+
+  conversation AgentConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([conversationId])
+  @@index([sender])
+  @@index([direction])
+  @@index([intent])
+  @@index([createdAt])
+  @@map("agent_conversation_messages")
 }
