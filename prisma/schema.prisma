@@ -75,6 +75,7 @@ model Package {
   id       String  @id @default(uuid())
   code     String  @unique
   isActive Boolean @default(true)
+  promotionOptions PromotionPackageOption[]
 
   adultPriceMXN  Int
   childPriceMXN  Int @default(0)
@@ -152,6 +153,7 @@ model Campaign {
   source   String?
   isActive Boolean @default(true)
   promotions Promotion[]
+  promotionOptions PromotionPackageOption[]
 
   packageId String?
   package   Package? @relation(fields: [packageId], references: [id], onDelete: SetNull)
@@ -568,6 +570,7 @@ model Promotion {
 
   code     String  @unique
   isActive Boolean @default(true)
+  packageOptions PromotionPackageOption[]
 
   sectionType PromotionSectionType @default(STANDARD)
 
@@ -606,4 +609,34 @@ model Promotion {
   @@index([imageMediaId])
 
   @@map("promotions")
+}
+
+model PromotionPackageOption {
+  id String @id @default(uuid())
+
+  promotionId String
+  packageId   String
+  campaignId  String?
+
+  label       String?
+  description String?
+
+  displayPriceMXN Int?
+  order           Int @default(0)
+  isActive        Boolean @default(true)
+
+  promotion Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  package   Package   @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  campaign  Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([promotionId])
+  @@index([packageId])
+  @@index([campaignId])
+  @@index([isActive])
+  @@index([order])
+
+  @@map("promotion_package_options")
 }
