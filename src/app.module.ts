@@ -14,6 +14,7 @@ import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
 import { LegalModule } from './modules/legal/legal.module';
 import { AgentModule } from './modules/agent/agent.module';
 import { AiModule } from './modules/ai/ai.module';
+import { PromotionsModule } from './modules/promotions/promotions.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { AiModule } from './modules/ai/ai.module';
     LegalModule,
     AgentModule,
     AiModule,
+    PromotionsModule,
   ],
 })
 export class AppModule {}

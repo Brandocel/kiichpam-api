@@ -93,6 +93,7 @@ model Package {
   campaigns    Campaign[]
   reservations Reservation[]
   coupons      Coupon[]
+  promotions Promotion[]
 
   coverMediaId String?
   coverMedia   MediaAsset? @relation("PackageCover", fields: [coverMediaId], references: [id], onDelete: SetNull)
@@ -150,6 +151,7 @@ model Campaign {
   name     String
   source   String?
   isActive Boolean @default(true)
+  promotions Promotion[]
 
   packageId String?
   package   Package? @relation(fields: [packageId], references: [id], onDelete: SetNull)
@@ -392,6 +394,7 @@ model MediaAsset {
   path         String
   url          String
   isActive     Boolean   @default(true)
+  promotionImages Promotion[]
 
   data Bytes?
 
@@ -553,4 +556,54 @@ model AgentConversationMessage {
   @@index([intent])
   @@index([createdAt])
   @@map("agent_conversation_messages")
+}
+
+enum PromotionSectionType {
+  MONTHLY
+  STANDARD
+}
+
+model Promotion {
+  id String @id @default(uuid())
+
+  code     String  @unique
+  isActive Boolean @default(true)
+
+  sectionType PromotionSectionType @default(STANDARD)
+
+  title       String
+  subtitle    String?
+  description String?
+
+  buttonText String?
+  buttonUrl  String?
+
+  order    Int @default(0)
+  priority Int @default(0)
+
+  startAt DateTime?
+  endAt   DateTime?
+
+  packageId String?
+  campaignId String?
+  imageMediaId String?
+
+  package Package? @relation(fields: [packageId], references: [id], onDelete: SetNull)
+  campaign Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  imageMedia MediaAsset? @relation(fields: [imageMediaId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive])
+  @@index([sectionType])
+  @@index([startAt])
+  @@index([endAt])
+  @@index([order])
+  @@index([priority])
+  @@index([packageId])
+  @@index([campaignId])
+  @@index([imageMediaId])
+
+  @@map("promotions")
 }
