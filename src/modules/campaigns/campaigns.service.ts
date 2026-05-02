@@ -73,14 +73,14 @@ export class CampaignsService {
     isActive = true,
   ): CampaignStatus {
     if (!isActive) return CampaignStatus.DISABLED;
-    if (!startAt || !endAt) return CampaignStatus.ACTIVE;
+    if (!startAt && !endAt) return CampaignStatus.ACTIVE;
 
     const now = new Date();
 
-    if (now < startAt) return CampaignStatus.SCHEDULED;
-    if (now >= startAt && now <= endAt) return CampaignStatus.ACTIVE;
+    if (startAt && now < startAt) return CampaignStatus.SCHEDULED;
+    if (endAt && now > endAt) return CampaignStatus.EXPIRED;
 
-    return CampaignStatus.EXPIRED;
+    return CampaignStatus.ACTIVE;
   }
 
   private validateDates(startAt?: string, endAt?: string) {
@@ -100,6 +100,19 @@ export class CampaignsService {
     if (start >= end) {
       throw new BadRequestException('startAt must be before endAt');
     }
+  }
+
+  private buildActiveDateWhere(quoteAt: Date) {
+    return {
+      AND: [
+        {
+          OR: [{ startAt: null }, { startAt: { lte: quoteAt } }],
+        },
+        {
+          OR: [{ endAt: null }, { endAt: { gte: quoteAt } }],
+        },
+      ],
+    };
   }
 
   private validateRule(data: {
@@ -331,6 +344,35 @@ export class CampaignsService {
     });
 
     return this.sortCampaigns([...byId.values()]);
+  }
+
+  private mergeRequestedCampaign(
+    chosenCampaigns: any[],
+    requestedCampaign: any,
+  ) {
+    const withoutDuplicated = chosenCampaigns.filter(
+      (campaign) => campaign.id !== requestedCampaign.id,
+    );
+
+    if (requestedCampaign.stackable) {
+      return this.sortCampaigns([requestedCampaign, ...withoutDuplicated]);
+    }
+
+    const requestedIsPrice =
+      requestedCampaign.category === CampaignCategory.PRICE ||
+      requestedCampaign.category === CampaignCategory.MIXED;
+
+    const filtered = withoutDuplicated.filter((campaign) => {
+      const currentIsPrice =
+        campaign.category === CampaignCategory.PRICE ||
+        campaign.category === CampaignCategory.MIXED;
+
+      if (requestedIsPrice && currentIsPrice) return false;
+
+      return true;
+    });
+
+    return this.sortCampaigns([requestedCampaign, ...filtered]);
   }
 
   private computeSingleCampaignPricing(params: {
@@ -649,12 +691,18 @@ export class CampaignsService {
           ? new Date(params.quoteAt)
           : new Date();
 
+    if (Number.isNaN(quoteAt.getTime())) {
+      throw new BadRequestException('Invalid quoteAt');
+    }
+
     const lang = params.lang ?? 'es';
-    const adults = params.adults ?? 0;
-    const children = params.children ?? 0;
-    const infants = params.infants ?? 0;
+    const adults = Math.max(0, Number(params.adults ?? 0));
+    const children = Math.max(0, Number(params.children ?? 0));
+    const infants = Math.max(0, Number(params.infants ?? 0));
     const packageCode = params.packageCode.trim().toUpperCase();
-    const requestedCampaignCode = params.requestedCampaignCode?.trim().toUpperCase();
+    const requestedCampaignCode = params.requestedCampaignCode
+      ?.trim()
+      .toUpperCase();
 
     const pkg = await this.getBasePackage(packageCode, lang);
 
@@ -671,21 +719,18 @@ export class CampaignsService {
         infants * pkg.infantPriceMXN,
     };
 
-    const activeCampaigns = await this.prisma.campaign.findMany({
+    const activeAutoCampaigns = await this.prisma.campaign.findMany({
       where: {
-        packageId: pkg.id,
         isActive: true,
         status: CampaignStatus.ACTIVE,
         autoApply: true,
-        OR: [
-          { startAt: null, endAt: null },
-          {
-            startAt: { lte: quoteAt },
-            endAt: { gte: quoteAt },
-          },
-        ],
+        OR: [{ packageId: pkg.id }, { packageId: null }],
+        ...this.buildActiveDateWhere(quoteAt),
       },
       include: {
+        package: {
+          select: { id: true, code: true },
+        },
         translations: {
           include: {
             imageMedia: {
@@ -698,22 +743,53 @@ export class CampaignsService {
     });
 
     let chosenCampaigns = this.chooseApplicableCampaigns(
-      activeCampaigns,
+      activeAutoCampaigns,
       adults,
       children,
       infants,
     );
 
     if (requestedCampaignCode) {
-      const requested = chosenCampaigns.find(
-        (campaign) => campaign.code === requestedCampaignCode,
-      );
+      const requestedCampaign = await this.prisma.campaign.findFirst({
+        where: {
+          code: requestedCampaignCode,
+          isActive: true,
+          status: CampaignStatus.ACTIVE,
+          OR: [{ packageId: pkg.id }, { packageId: null }],
+          ...this.buildActiveDateWhere(quoteAt),
+        },
+        include: {
+          package: {
+            select: { id: true, code: true },
+          },
+          translations: {
+            include: {
+              imageMedia: {
+                select: { id: true, url: true, mimeType: true },
+              },
+            },
+          },
+        },
+      });
 
-      if (!requested) {
+      if (
+        !requestedCampaign ||
+        !this.passesMinRequirements(
+          requestedCampaign,
+          adults,
+          children,
+          infants,
+        )
+      ) {
         throw new BadRequestException(
           'Requested campaign is not active or not applicable',
         );
       }
+
+      chosenCampaigns = this.mergeRequestedCampaign(
+        chosenCampaigns,
+        requestedCampaign,
+      );
     }
 
     const campaignPricing = this.calculateCampaignPricing({
@@ -748,6 +824,13 @@ export class CampaignsService {
         priority: c.priority,
         audience: c.audience,
         stackable: c.stackable,
+        autoApply: c.autoApply,
+        package: c.package
+          ? {
+              id: c.package.id,
+              code: c.package.code,
+            }
+          : null,
       })),
       appliedCampaignCodes: chosenCampaigns.map((c) => c.code),
       primaryCampaignCode: chosenCampaigns[0]?.code ?? null,
@@ -769,7 +852,7 @@ export class CampaignsService {
     };
   }
 
-  async quote(dto: QuoteCampaignDto) {
+  async quote(dto: QuoteCampaignDto & { campaignCode?: string }) {
     const result = await this.resolveQuote({
       packageCode: dto.packageCode,
       adults: dto.adults ?? 0,
@@ -777,6 +860,7 @@ export class CampaignsService {
       infants: dto.infants ?? 0,
       lang: dto.lang ?? 'es',
       quoteAt: dto.quoteAt,
+      requestedCampaignCode: dto.campaignCode,
     });
 
     return {
@@ -794,6 +878,8 @@ export class CampaignsService {
           translation: result.packageEntity.translations?.[0] ?? null,
         },
         appliedCampaigns: result.appliedCampaigns,
+        appliedCampaignCodes: result.appliedCampaignCodes,
+        primaryCampaignCode: result.primaryCampaignCode,
         effectivePackage: {
           code: result.packageEntity.code,
           currency: result.packageEntity.currency,
@@ -818,10 +904,21 @@ export class CampaignsService {
   }
 
   async findAll(packageCode?: string) {
+    const normalizedPackageCode = packageCode?.trim().toUpperCase();
+
     const items = await this.prisma.campaign.findMany({
-      where: packageCode
+      where: normalizedPackageCode
         ? {
-            package: { code: packageCode },
+            OR: [
+              {
+                package: {
+                  code: normalizedPackageCode,
+                },
+              },
+              {
+                packageId: null,
+              },
+            ],
           }
         : undefined,
       include: {
@@ -847,7 +944,7 @@ export class CampaignsService {
 
   async findOneByCode(code: string) {
     const item = await this.prisma.campaign.findUnique({
-      where: { code },
+      where: { code: code.trim().toUpperCase() },
       include: {
         package: {
           select: { id: true, code: true },
@@ -872,27 +969,25 @@ export class CampaignsService {
 
   async findActiveByPackageCode(packageCode: string) {
     const now = new Date();
+    const normalizedPackageCode = packageCode.trim().toUpperCase();
 
     const pkg = await this.prisma.package.findUnique({
-      where: { code: packageCode },
+      where: { code: normalizedPackageCode },
     });
 
     if (!pkg) throw new NotFoundException('Package not found');
 
     const campaigns = await this.prisma.campaign.findMany({
       where: {
-        packageId: pkg.id,
         isActive: true,
         status: CampaignStatus.ACTIVE,
-        OR: [
-          { startAt: null, endAt: null },
-          {
-            startAt: { lte: now },
-            endAt: { gte: now },
-          },
-        ],
+        OR: [{ packageId: pkg.id }, { packageId: null }],
+        ...this.buildActiveDateWhere(now),
       },
       include: {
+        package: {
+          select: { id: true, code: true },
+        },
         translations: {
           include: {
             imageMedia: {
@@ -1027,21 +1122,31 @@ export class CampaignsService {
   }
 
   async updateByCode(code: string, dto: UpdateCampaignDto) {
+    const normalizedCode = code.trim().toUpperCase();
+
     const campaign = await this.prisma.campaign.findUnique({
-      where: { code },
+      where: { code: normalizedCode },
       include: { translations: true },
     });
 
     if (!campaign) throw new NotFoundException('Campaign not found');
 
     const nextStartAt =
-      dto.startAt !== undefined ? new Date(dto.startAt) : campaign.startAt;
+      dto.startAt !== undefined
+        ? dto.startAt
+          ? new Date(dto.startAt)
+          : null
+        : campaign.startAt;
 
     const nextEndAt =
-      dto.endAt !== undefined ? new Date(dto.endAt) : campaign.endAt;
+      dto.endAt !== undefined
+        ? dto.endAt
+          ? new Date(dto.endAt)
+          : null
+        : campaign.endAt;
 
     if (dto.startAt !== undefined || dto.endAt !== undefined) {
-      if (!dto.startAt || !dto.endAt) {
+      if ((dto.startAt && !dto.endAt) || (!dto.startAt && dto.endAt)) {
         throw new BadRequestException('startAt and endAt must be sent together');
       }
 
@@ -1094,14 +1199,16 @@ export class CampaignsService {
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const updatedCampaign = await tx.campaign.update({
-        where: { code },
+        where: { code: normalizedCode },
         data: {
           ...(dto.name !== undefined ? { name: dto.name } : {}),
           ...(dto.source !== undefined ? { source: dto.source } : {}),
           ...(dto.description !== undefined
             ? { description: dto.description }
             : {}),
-          ...(dto.packageId !== undefined ? { packageId: dto.packageId } : {}),
+          ...(dto.packageId !== undefined
+            ? { packageId: dto.packageId || null }
+            : {}),
           ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
           ...(dto.category !== undefined
             ? { category: dto.category as CampaignCategory }
@@ -1112,8 +1219,8 @@ export class CampaignsService {
           ...(dto.audience !== undefined
             ? { audience: dto.audience as CampaignAudience }
             : {}),
-          ...(dto.startAt !== undefined ? { startAt: new Date(dto.startAt) } : {}),
-          ...(dto.endAt !== undefined ? { endAt: new Date(dto.endAt) } : {}),
+          ...(dto.startAt !== undefined ? { startAt: nextStartAt } : {}),
+          ...(dto.endAt !== undefined ? { endAt: nextEndAt } : {}),
           ...(dto.priority !== undefined ? { priority: dto.priority } : {}),
           ...(dto.autoApply !== undefined ? { autoApply: dto.autoApply } : {}),
           ...(dto.stackable !== undefined ? { stackable: dto.stackable } : {}),
@@ -1168,7 +1275,7 @@ export class CampaignsService {
       }
 
       return tx.campaign.findUnique({
-        where: { code },
+        where: { code: normalizedCode },
         include: {
           package: {
             select: { id: true, code: true },
@@ -1192,8 +1299,10 @@ export class CampaignsService {
   }
 
   async enableByCode(code: string) {
+    const normalizedCode = code.trim().toUpperCase();
+
     const campaign = await this.prisma.campaign.findUnique({
-      where: { code },
+      where: { code: normalizedCode },
     });
 
     if (!campaign) throw new NotFoundException('Campaign not found');
@@ -1201,7 +1310,7 @@ export class CampaignsService {
     const status = this.resolveStatus(campaign.startAt, campaign.endAt, true);
 
     const updated = await this.prisma.campaign.update({
-      where: { code },
+      where: { code: normalizedCode },
       data: {
         isActive: true,
         status,
@@ -1216,14 +1325,16 @@ export class CampaignsService {
   }
 
   async disableByCode(code: string) {
+    const normalizedCode = code.trim().toUpperCase();
+
     const campaign = await this.prisma.campaign.findUnique({
-      where: { code },
+      where: { code: normalizedCode },
     });
 
     if (!campaign) throw new NotFoundException('Campaign not found');
 
     const updated = await this.prisma.campaign.update({
-      where: { code },
+      where: { code: normalizedCode },
       data: {
         isActive: false,
         status: CampaignStatus.DISABLED,
