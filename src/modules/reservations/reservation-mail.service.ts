@@ -632,15 +632,23 @@ export class ReservationMailService {
       return (
         reservation.snapshotNameEn ??
         reservation.snapshotName ??
+        reservation.translation?.name ??
+        reservation.effectivePackage?.name ??
+        reservation.package?.translation?.name ??
+        reservation.package?.effectivePackage?.name ??
         reservation.package?.nameEn ??
         reservation.package?.name ??
         reservation.package?.code ??
         'Package'
       );
     }
-
+  
     return (
       reservation.snapshotName ??
+      reservation.translation?.name ??
+      reservation.effectivePackage?.name ??
+      reservation.package?.translation?.name ??
+      reservation.package?.effectivePackage?.name ??
       reservation.package?.name ??
       reservation.package?.code ??
       'Paquete'
@@ -699,23 +707,34 @@ export class ReservationMailService {
     const raw =
       reservation.snapshotPackageDetails?.inclusions ??
       reservation.snapshotInclusions ??
+      reservation.translation?.includes ??
+      reservation.effectivePackage?.includes ??
+      reservation.package?.translation?.includes ??
+      reservation.package?.effectivePackage?.includes ??
       reservation.package?.inclusions ??
       reservation.package?.includes ??
       reservation.inclusions ??
+      reservation.includes ??
       [];
-
+  
     return this.toStringArray(raw);
   }
-
+  
   private getExclusions(reservation: any): string[] {
     const raw =
       reservation.snapshotPackageDetails?.exclusions ??
       reservation.snapshotExclusions ??
+      reservation.translation?.excludes ??
+      reservation.effectivePackage?.excludes ??
+      reservation.package?.translation?.excludes ??
+      reservation.package?.effectivePackage?.excludes ??
       reservation.package?.exclusions ??
+      reservation.package?.excludes ??
       reservation.package?.notIncludes ??
       reservation.exclusions ??
+      reservation.excludes ??
       [];
-
+  
     return this.toStringArray(raw);
   }
 
