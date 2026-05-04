@@ -30,32 +30,38 @@ export class PaymentsService {
     this.stripe = new Stripe(secretKey);
   }
 
-  private normalizeStripeAmountFromReservationTotal(rawAmount: unknown): {
-    reservationTotalMXN: number;
-    stripeAmount: number;
-    detectedUnit: 'mxn' | 'centavos';
-  } {
-    const numericAmount = Number(rawAmount);
+  private getStripeAmountFromReservationTotal(totalCentavos: unknown): number {
+    const amount = Number(totalCentavos);
 
-    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
-      throw new BadRequestException('Monto inválido para Stripe');
+    if (!Number.isInteger(amount) || amount <= 0) {
+      throw new BadRequestException(
+        'Monto inválido. El total de la reservación debe estar guardado en centavos.',
+      );
     }
 
-    const hasDecimals = !Number.isInteger(numericAmount);
-
-    if (hasDecimals || numericAmount <= 10000) {
-      return {
-        reservationTotalMXN: numericAmount,
-        stripeAmount: Math.round(numericAmount * 100),
-        detectedUnit: 'mxn',
-      };
+    if (amount < 100) {
+      throw new BadRequestException(
+        'Monto demasiado bajo para Stripe. Revisa el total de la reservación.',
+      );
     }
 
-    return {
-      reservationTotalMXN: numericAmount / 100,
-      stripeAmount: Math.round(numericAmount),
-      detectedUnit: 'centavos',
-    };
+    if (amount > 5000000) {
+      throw new BadRequestException(
+        'Monto demasiado alto para Stripe. Revisa el total antes de cobrar.',
+      );
+    }
+
+    return amount;
+  }
+
+  private toMXNFromCentavos(value: unknown): number {
+    const amount = Number(value ?? 0);
+
+    if (!Number.isFinite(amount)) {
+      return 0;
+    }
+
+    return amount / 100;
   }
 
   private buildCardResponse(
@@ -73,12 +79,14 @@ export class PaymentsService {
       folio: reservation.folio,
       status: paymentIntent.status,
       currency: (reservation.currency ?? currency ?? 'MXN').toUpperCase(),
-      totalMXN: Number(reservation.totalMXN),
+      totalMXN: this.toMXNFromCentavos(reservation.totalMXN),
+      totalCentavos: Number(reservation.totalMXN),
       reservationId: reservation.id,
       stripe: {
         paymentIntentId: paymentIntent.id,
         clientSecret: paymentIntent.client_secret,
         amount: paymentIntent.amount,
+        amountMXN: paymentIntent.amount / 100,
         currency: paymentIntent.currency,
         status: paymentIntent.status,
       },
@@ -102,7 +110,8 @@ export class PaymentsService {
       folio: reservation.folio,
       status: paymentIntent.status,
       currency: (reservation.currency ?? 'MXN').toUpperCase(),
-      totalMXN: Number(reservation.totalMXN),
+      totalMXN: this.toMXNFromCentavos(reservation.totalMXN),
+      totalCentavos: Number(reservation.totalMXN),
       reservationId: reservation.id,
       paymentMethod: 'oxxo',
       reference: oxxoDetails?.number ?? null,
@@ -114,6 +123,7 @@ export class PaymentsService {
         paymentIntentId: paymentIntent.id,
         clientSecret: paymentIntent.client_secret,
         amount: paymentIntent.amount,
+        amountMXN: paymentIntent.amount / 100,
         currency: paymentIntent.currency,
         status: paymentIntent.status,
       },
@@ -143,12 +153,6 @@ export class PaymentsService {
       );
     }
 
-    const rawTotal = Number(reservation.totalMXN);
-
-    if (!Number.isFinite(rawTotal) || rawTotal <= 0) {
-      throw new BadRequestException('La reservación no tiene un total válido');
-    }
-
     if (reservation.status === 'PAID') {
       throw new BadRequestException('La reservación ya está pagada');
     }
@@ -160,30 +164,43 @@ export class PaymentsService {
     }
 
     const currency = (reservation.currency ?? 'MXN').toLowerCase();
-    const normalizedAmount =
-      this.normalizeStripeAmountFromReservationTotal(rawTotal);
 
-    this.logger.log(
-      `[CARD] folio=${reservation.folio} rawTotal=${rawTotal} detectedUnit=${normalizedAmount.detectedUnit} totalMXN=${normalizedAmount.reservationTotalMXN} stripeAmount=${normalizedAmount.stripeAmount}`,
+    if (currency !== 'mxn') {
+      throw new BadRequestException('Por seguridad, solo se permiten pagos en MXN');
+    }
+
+    const stripeAmount = this.getStripeAmountFromReservationTotal(
+      reservation.totalMXN,
     );
 
-    const paymentIntent = await this.stripe.paymentIntents.create({
-      amount: normalizedAmount.stripeAmount,
-      currency,
-      metadata: {
-        folio: reservation.folio,
-        reservationId: reservation.id,
-        packageId: reservation.packageId,
-        detectedUnit: normalizedAmount.detectedUnit,
+    this.logger.warn(
+      `[CARD_AMOUNT_CHECK] folio=${reservation.folio} totalCentavos=${stripeAmount} totalMXN=${stripeAmount / 100}`,
+    );
+
+    const paymentIntent = await this.stripe.paymentIntents.create(
+      {
+        amount: stripeAmount,
+        currency,
+        metadata: {
+          folio: reservation.folio,
+          reservationId: reservation.id,
+          packageId: reservation.packageId,
+          amountUnit: 'centavos',
+          totalCentavos: String(stripeAmount),
+          totalMXN: String(stripeAmount / 100),
+        },
+        description: `Pago de reservación ${reservation.folio}`,
+        automatic_payment_methods: {
+          enabled: true,
+        },
       },
-      description: `Pago de reservación ${reservation.folio}`,
-      automatic_payment_methods: {
-        enabled: true,
+      {
+        idempotencyKey: `reservation-card-${reservation.folio}-${stripeAmount}`,
       },
-    });
+    );
 
     this.logger.log(
-      `PaymentIntent creado: ${paymentIntent.id} para folio ${reservation.folio}`,
+      `PaymentIntent creado: ${paymentIntent.id} para folio ${reservation.folio} por $${stripeAmount / 100} MXN`,
     );
 
     return this.buildCardResponse(reservation, paymentIntent, currency);
@@ -209,12 +226,6 @@ export class PaymentsService {
       throw new NotFoundException(
         `No existe la reservación con folio ${normalizedFolio}`,
       );
-    }
-
-    const rawTotal = Number(reservation.totalMXN);
-
-    if (!Number.isFinite(rawTotal) || rawTotal <= 0) {
-      throw new BadRequestException('La reservación no tiene un total válido');
     }
 
     if (reservation.status === 'PAID') {
@@ -244,9 +255,8 @@ export class PaymentsService {
       );
     }
 
-    const existingOxxoIntent = await this.findActiveOxxoPaymentIntentByFolio(
-      normalizedFolio,
-    );
+    const existingOxxoIntent =
+      await this.findActiveOxxoPaymentIntentByFolio(normalizedFolio);
 
     if (existingOxxoIntent) {
       await this.prisma.reservation.update({
@@ -269,39 +279,47 @@ export class PaymentsService {
       );
     }
 
-    const normalizedAmount =
-      this.normalizeStripeAmountFromReservationTotal(rawTotal);
-
-    this.logger.log(
-      `[OXXO] folio=${reservation.folio} rawTotal=${rawTotal} detectedUnit=${normalizedAmount.detectedUnit} totalMXN=${normalizedAmount.reservationTotalMXN} stripeAmount=${normalizedAmount.stripeAmount}`,
+    const stripeAmount = this.getStripeAmountFromReservationTotal(
+      reservation.totalMXN,
     );
 
-    const paymentIntent = await this.stripe.paymentIntents.create({
-      amount: normalizedAmount.stripeAmount,
-      currency: 'mxn',
-      confirm: true,
-      payment_method_data: {
-        type: 'oxxo',
-        billing_details: {
-          name: customerName,
-          email: reservation.email,
+    this.logger.warn(
+      `[OXXO_AMOUNT_CHECK] folio=${reservation.folio} totalCentavos=${stripeAmount} totalMXN=${stripeAmount / 100}`,
+    );
+
+    const paymentIntent = await this.stripe.paymentIntents.create(
+      {
+        amount: stripeAmount,
+        currency: 'mxn',
+        confirm: true,
+        payment_method_data: {
+          type: 'oxxo',
+          billing_details: {
+            name: customerName,
+            email: reservation.email,
+          },
         },
-      },
-      payment_method_types: ['oxxo'],
-      payment_method_options: {
-        oxxo: {
-          expires_after_days: 3,
+        payment_method_types: ['oxxo'],
+        payment_method_options: {
+          oxxo: {
+            expires_after_days: 3,
+          },
         },
+        metadata: {
+          folio: reservation.folio,
+          reservationId: reservation.id,
+          packageId: reservation.packageId,
+          paymentType: 'oxxo',
+          amountUnit: 'centavos',
+          totalCentavos: String(stripeAmount),
+          totalMXN: String(stripeAmount / 100),
+        },
+        description: `Referencia OXXO de reservación ${reservation.folio}`,
       },
-      metadata: {
-        folio: reservation.folio,
-        reservationId: reservation.id,
-        packageId: reservation.packageId,
-        paymentType: 'oxxo',
-        detectedUnit: normalizedAmount.detectedUnit,
+      {
+        idempotencyKey: `reservation-oxxo-${reservation.folio}-${stripeAmount}`,
       },
-      description: `Referencia OXXO de reservación ${reservation.folio}`,
-    });
+    );
 
     const oxxoDetails = this.getOxxoDisplayDetails(paymentIntent);
 
@@ -323,7 +341,7 @@ export class PaymentsService {
     });
 
     this.logger.log(
-      `Referencia OXXO generada: ${paymentIntent.id} para folio ${reservation.folio}`,
+      `Referencia OXXO generada: ${paymentIntent.id} para folio ${reservation.folio} por $${stripeAmount / 100} MXN`,
     );
 
     return this.buildOxxoResponse(
@@ -377,7 +395,8 @@ export class PaymentsService {
       canRetryPayment: ['DRAFT', 'PAYMENT_FAILED', 'CANCELED'].includes(
         reservation.status,
       ),
-      totalMXN: reservation.totalMXN,
+      totalMXN: this.toMXNFromCentavos(reservation.totalMXN),
+      totalCentavos: Number(reservation.totalMXN),
       currency: reservation.currency,
       customer: {
         firstName: reservation.firstName,
@@ -438,6 +457,8 @@ export class PaymentsService {
       };
     }
 
+    this.validateStripeAmountMatchesReservation(reservation, paymentIntent);
+
     let newStatus = reservation.status;
 
     switch (paymentIntent.status) {
@@ -458,11 +479,9 @@ export class PaymentsService {
         break;
 
       case 'requires_action':
-        if (paymentIntent.payment_method_types?.includes('oxxo')) {
-          newStatus = 'PROCESSING_PAYMENT';
-        } else {
-          newStatus = 'DRAFT';
-        }
+        newStatus = paymentIntent.payment_method_types?.includes('oxxo')
+          ? 'PROCESSING_PAYMENT'
+          : 'DRAFT';
         break;
 
       case 'requires_confirmation':
@@ -547,6 +566,8 @@ export class PaymentsService {
       );
     }
 
+    this.validateStripeAmountMatchesReservation(reservation, paymentIntent);
+
     if (paymentIntent.status !== 'succeeded') {
       throw new BadRequestException(
         `El pago no está exitoso en Stripe. Estado actual: ${paymentIntent.status}`,
@@ -587,10 +608,6 @@ export class PaymentsService {
       },
     });
 
-    this.logger.log(
-      `Refund creado: ${refund.id} para folio ${normalizedFolio}, charge=${chargeId}`,
-    );
-
     const refundAmountMXN =
       typeof refund.amount === 'number' ? refund.amount / 100 : null;
 
@@ -629,8 +646,6 @@ export class PaymentsService {
       message: isFullRefund
         ? 'Reembolso completo realizado correctamente'
         : 'Reembolso procesado correctamente',
-      note:
-        'Si quieres marcar la reservación como REFUNDED en base de datos, primero confirma que ese estado existe en tu esquema Prisma.',
     };
   }
 
@@ -715,10 +730,6 @@ export class PaymentsService {
         status: 'CANCELED',
       },
     });
-
-    this.logger.warn(
-      `PaymentIntent cancelado: ${canceledIntent.id} para folio ${normalizedFolio}`,
-    );
 
     return {
       success: true,
@@ -807,10 +818,6 @@ export class PaymentsService {
   ) {
     const folio = this.getFolioFromPaymentIntent(paymentIntent);
 
-    this.logger.log(
-      `payment_intent.succeeded recibido. intentId=${paymentIntent.id}, folio=${folio ?? 'N/A'}`,
-    );
-
     if (!folio) {
       this.logger.warn(
         `No llegó folio en metadata para payment_intent.succeeded (${paymentIntent.id})`,
@@ -837,6 +844,8 @@ export class PaymentsService {
       return;
     }
 
+    this.validateStripeAmountMatchesReservation(reservation, paymentIntent);
+
     const updatedReservation = await this.prisma.reservation.update({
       where: { folio },
       data: {
@@ -849,8 +858,9 @@ export class PaymentsService {
             metadata: {
               stripePaymentIntentId: paymentIntent.id,
               stripeStatus: paymentIntent.status,
-              amount: paymentIntent.amount,
-              amountReceived: paymentIntent.amount_received,
+              amountCentavos: paymentIntent.amount,
+              amountReceivedCentavos: paymentIntent.amount_received,
+              amountMXN: paymentIntent.amount / 100,
               currency: paymentIntent.currency,
               previousStatus: reservation.status,
             },
@@ -869,8 +879,6 @@ export class PaymentsService {
       },
     });
 
-    this.logger.log(`Reservación ${folio} actualizada a PAID`);
-
     await this.syncReservationToGoogleCalendar(folio);
     await this.sendPaidReservationEmailsFromWebhook(updatedReservation);
   }
@@ -879,10 +887,6 @@ export class PaymentsService {
     paymentIntent: Stripe.PaymentIntent,
   ) {
     const folio = this.getFolioFromPaymentIntent(paymentIntent);
-
-    this.logger.warn(
-      `payment_intent.payment_failed recibido. intentId=${paymentIntent.id}, folio=${folio ?? 'N/A'}`,
-    );
 
     if (!folio) {
       this.logger.warn(
@@ -906,18 +910,12 @@ export class PaymentsService {
         status: 'PAYMENT_FAILED',
       },
     });
-
-    this.logger.log(`Reservación ${folio} actualizada a PAYMENT_FAILED`);
   }
 
   private async handlePaymentIntentProcessing(
     paymentIntent: Stripe.PaymentIntent,
   ) {
     const folio = this.getFolioFromPaymentIntent(paymentIntent);
-
-    this.logger.log(
-      `payment_intent.processing recibido. intentId=${paymentIntent.id}, folio=${folio ?? 'N/A'}`,
-    );
 
     if (!folio) {
       this.logger.warn(
@@ -941,18 +939,12 @@ export class PaymentsService {
         status: 'PROCESSING_PAYMENT',
       },
     });
-
-    this.logger.log(`Reservación ${folio} actualizada a PROCESSING_PAYMENT`);
   }
 
   private async handlePaymentIntentCanceled(
     paymentIntent: Stripe.PaymentIntent,
   ) {
     const folio = this.getFolioFromPaymentIntent(paymentIntent);
-
-    this.logger.warn(
-      `payment_intent.canceled recibido. intentId=${paymentIntent.id}, folio=${folio ?? 'N/A'}`,
-    );
 
     if (!folio) {
       this.logger.warn(
@@ -976,18 +968,12 @@ export class PaymentsService {
         status: 'CANCELED',
       },
     });
-
-    this.logger.log(`Reservación ${folio} actualizada a CANCELED`);
   }
 
   private async handlePaymentIntentRequiresAction(
     paymentIntent: Stripe.PaymentIntent,
   ) {
     const folio = this.getFolioFromPaymentIntent(paymentIntent);
-
-    this.logger.log(
-      `payment_intent.requires_action recibido. intentId=${paymentIntent.id}, folio=${folio ?? 'N/A'}`,
-    );
 
     if (!folio) {
       this.logger.warn(
@@ -1011,24 +997,36 @@ export class PaymentsService {
         status: 'PROCESSING_PAYMENT',
       },
     });
+  }
 
-    this.logger.log(`Reservación ${folio} actualizada a PROCESSING_PAYMENT`);
+  private validateStripeAmountMatchesReservation(
+    reservation: { folio: string; totalMXN: unknown },
+    paymentIntent: Stripe.PaymentIntent,
+  ) {
+    const reservationAmount = this.getStripeAmountFromReservationTotal(
+      reservation.totalMXN,
+    );
+
+    const stripeAmount = paymentIntent.amount_received || paymentIntent.amount;
+
+    if (stripeAmount !== reservationAmount) {
+      this.logger.error(
+        `[PAYMENT_AMOUNT_MISMATCH] folio=${reservation.folio} reservationCentavos=${reservationAmount} stripeCentavos=${stripeAmount} reservationMXN=${reservationAmount / 100} stripeMXN=${stripeAmount / 100}`,
+      );
+
+      throw new BadRequestException(
+        'El monto pagado en Stripe no coincide con el total de la reservación. No se marcará como pagada por seguridad.',
+      );
+    }
   }
 
   private async sendPaidReservationEmailsFromWebhook(reservation: any) {
     try {
       if (!reservation?.folio) {
-        this.logger.warn(
-          'No se pudo enviar correo automático porque la reserva no tiene folio',
-        );
         return;
       }
 
       if (!reservation.email) {
-        this.logger.warn(
-          `No se envió correo automático para ${reservation.folio} porque no tiene email`,
-        );
-
         await this.prisma.reservationTrace.create({
           data: {
             reservationId: reservation.id,
@@ -1057,10 +1055,6 @@ export class PaymentsService {
       });
 
       if (alreadySent) {
-        this.logger.log(
-          `Correo automático omitido para ${reservation.folio}; ya fue enviado previamente`,
-        );
-
         await this.prisma.reservationTrace.create({
           data: {
             reservationId: reservation.id,
@@ -1079,10 +1073,6 @@ export class PaymentsService {
 
       const emailResult =
         await this.reservationMailService.sendReservationPaidEmails(reservation);
-
-      this.logger.log(
-        `Correo automático de reserva pagada enviado para ${reservation.folio}`,
-      );
 
       await this.prisma.reservationTrace.create({
         data: {
@@ -1132,17 +1122,10 @@ export class PaymentsService {
       });
 
       if (!reservation) {
-        this.logger.warn(
-          `No se encontró la reservación ${folio} para sincronizar a Google Calendar`,
-        );
         return;
       }
 
       await this.googleCalendarService.upsertReservationEvent(reservation);
-
-      this.logger.log(
-        `Reservación ${folio} sincronizada correctamente con Google Calendar`,
-      );
     } catch (error: any) {
       this.logger.error(
         `Error al sincronizar la reservación ${folio} con Google Calendar: ${error.message}`,
@@ -1218,10 +1201,10 @@ export class PaymentsService {
   private getChargeIdFromPaymentIntent(
     paymentIntent: Stripe.PaymentIntent,
   ): string | null {
-    const charges = paymentIntent.latest_charge;
+    const charge = paymentIntent.latest_charge;
 
-    if (typeof charges === 'string' && charges.trim()) {
-      return charges;
+    if (typeof charge === 'string' && charge.trim()) {
+      return charge;
     }
 
     return null;
@@ -1272,13 +1255,5 @@ export class PaymentsService {
           message: 'La reservación aún no ha sido pagada',
         };
     }
-  }
-
-  private toStripeAmount(amountMXN: number): number {
-    if (!Number.isFinite(amountMXN) || amountMXN <= 0) {
-      throw new BadRequestException('Monto inválido para Stripe');
-    }
-
-    return Math.round(amountMXN * 100);
   }
 }
