@@ -443,7 +443,6 @@ export class ReservationMailService {
             inapamDiscount: 'INAPAM discount',
             total: 'Total paid',
             currency: 'Currency',
-            none: 'None',
           }
         : {
             paymentMethod: 'Método de pago',
@@ -453,7 +452,6 @@ export class ReservationMailService {
             inapamDiscount: 'Descuento INAPAM',
             total: 'Total pagado',
             currency: 'Moneda',
-            none: 'Ninguno',
           };
 
     const currency = reservation.currency ?? 'MXN';
@@ -462,9 +460,9 @@ export class ReservationMailService {
       <table style="width:100%; border-collapse:collapse; margin-top:12px;">
         ${this.row(labels.paymentMethod, this.escape(this.getPaymentMethod(reservation, lang)))}
         ${this.row(labels.subtotal, this.money(reservation.subtotalMXN, currency))}
-        ${this.row(labels.campaignDiscount, `-${this.money(reservation.campaignDiscountMXN, currency)}`)}
-        ${this.row(labels.couponDiscount, `-${this.money(reservation.couponDiscountMXN, currency)}`)}
-        ${this.row(labels.inapamDiscount, `-${this.money(reservation.inapamDiscountMXN, currency)}`)}
+        ${this.row(labels.campaignDiscount, this.negativeMoney(reservation.campaignDiscountMXN, currency))}
+        ${this.row(labels.couponDiscount, this.negativeMoney(reservation.couponDiscountMXN, currency))}
+        ${this.row(labels.inapamDiscount, this.negativeMoney(reservation.inapamDiscountMXN, currency))}
         ${this.row(labels.total, `<strong style="font-size:18px;color:#00586F;">${this.money(reservation.totalMXN, currency)}</strong>`)}
         ${this.row(labels.currency, this.escape(currency))}
       </table>
@@ -499,10 +497,10 @@ export class ReservationMailService {
       <table style="width:100%; border-collapse:collapse; margin-top:12px;">
         ${this.row(labels.campaign, this.escape(this.getCampaignName(reservation, labels.none)))}
         ${this.row(labels.campaignCode, this.escape(this.getCampaignCode(reservation, labels.none)))}
-        ${this.row(labels.campaignDiscount, `-${this.money(reservation.campaignDiscountMXN, currency)}`)}
+        ${this.row(labels.campaignDiscount, this.negativeMoney(reservation.campaignDiscountMXN, currency))}
         ${this.row(labels.coupon, this.escape(reservation.couponCode ?? labels.none))}
-        ${this.row(labels.couponDiscount, `-${this.money(reservation.couponDiscountMXN, currency)}`)}
-        ${this.row(labels.inapamDiscount, `-${this.money(reservation.inapamDiscountMXN, currency)}`)}
+        ${this.row(labels.couponDiscount, this.negativeMoney(reservation.couponDiscountMXN, currency))}
+        ${this.row(labels.inapamDiscount, this.negativeMoney(reservation.inapamDiscountMXN, currency))}
       </table>
     `;
   }
@@ -632,8 +630,9 @@ export class ReservationMailService {
       return (
         reservation.snapshotNameEn ??
         reservation.snapshotName ??
-        reservation.translation?.name ??
         reservation.effectivePackage?.name ??
+        reservation.translation?.name ??
+        reservation.package?.translations?.[0]?.name ??
         reservation.package?.translation?.name ??
         reservation.package?.effectivePackage?.name ??
         reservation.package?.nameEn ??
@@ -642,11 +641,12 @@ export class ReservationMailService {
         'Package'
       );
     }
-  
+
     return (
       reservation.snapshotName ??
-      reservation.translation?.name ??
       reservation.effectivePackage?.name ??
+      reservation.translation?.name ??
+      reservation.package?.translations?.[0]?.name ??
       reservation.package?.translation?.name ??
       reservation.package?.effectivePackage?.name ??
       reservation.package?.name ??
@@ -661,6 +661,9 @@ export class ReservationMailService {
       reservation.snapshotCampaignName ??
       reservation.campaign?.name ??
       reservation.campaign?.title ??
+      reservation.campaignCode ??
+      reservation.snapshotCampaignCode ??
+      reservation.campaign?.code ??
       fallback
     );
   }
@@ -685,7 +688,9 @@ export class ReservationMailService {
     const value = String(raw).toLowerCase();
 
     if (value.includes('stripe')) {
-      return lang === 'en' ? 'Card payment by Stripe' : 'Pago con tarjeta por Stripe';
+      return lang === 'en'
+        ? 'Card payment by Stripe'
+        : 'Pago con tarjeta por Stripe';
     }
 
     if (value.includes('cash') || value.includes('efectivo')) {
@@ -707,8 +712,9 @@ export class ReservationMailService {
     const raw =
       reservation.snapshotPackageDetails?.inclusions ??
       reservation.snapshotInclusions ??
-      reservation.translation?.includes ??
       reservation.effectivePackage?.includes ??
+      reservation.translation?.includes ??
+      reservation.package?.translations?.[0]?.includes ??
       reservation.package?.translation?.includes ??
       reservation.package?.effectivePackage?.includes ??
       reservation.package?.inclusions ??
@@ -716,16 +722,17 @@ export class ReservationMailService {
       reservation.inclusions ??
       reservation.includes ??
       [];
-  
+
     return this.toStringArray(raw);
   }
-  
+
   private getExclusions(reservation: any): string[] {
     const raw =
       reservation.snapshotPackageDetails?.exclusions ??
       reservation.snapshotExclusions ??
-      reservation.translation?.excludes ??
       reservation.effectivePackage?.excludes ??
+      reservation.translation?.excludes ??
+      reservation.package?.translations?.[0]?.excludes ??
       reservation.package?.translation?.excludes ??
       reservation.package?.effectivePackage?.excludes ??
       reservation.package?.exclusions ??
@@ -734,7 +741,7 @@ export class ReservationMailService {
       reservation.exclusions ??
       reservation.excludes ??
       [];
-  
+
     return this.toStringArray(raw);
   }
 
@@ -795,9 +802,23 @@ export class ReservationMailService {
   }
 
   private money(value: any, currency = 'MXN') {
-    const amount = Number(value ?? 0);
+    const amountCentavos = Number(value ?? 0);
 
-    return `$${amount.toFixed(2)} ${currency}`;
+    if (!Number.isFinite(amountCentavos)) {
+      return `$0.00 ${currency}`;
+    }
+
+    return `$${(amountCentavos / 100).toFixed(2)} ${currency}`;
+  }
+
+  private negativeMoney(value: any, currency = 'MXN') {
+    const amountCentavos = Number(value ?? 0);
+
+    if (!Number.isFinite(amountCentavos) || amountCentavos <= 0) {
+      return `-$0.00 ${currency}`;
+    }
+
+    return `-${this.money(amountCentavos, currency)}`;
   }
 
   private escape(value: any) {

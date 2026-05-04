@@ -30,6 +30,25 @@ export class PaymentsService {
     this.stripe = new Stripe(secretKey);
   }
 
+  private get packageEmailInclude() {
+    return {
+      coverMedia: true,
+      translations: {
+        where: {
+          lang: 'es',
+        },
+        select: {
+          lang: true,
+          name: true,
+          description: true,
+          includes: true,
+          excludes: true,
+          notes: true,
+        },
+      },
+    };
+  }
+
   private getStripeAmountFromReservationTotal(totalCentavos: unknown): number {
     const amount = Number(totalCentavos);
 
@@ -144,6 +163,9 @@ export class PaymentsService {
       include: {
         extras: true,
         payments: true,
+        package: {
+          include: this.packageEmailInclude,
+        },
       },
     });
 
@@ -166,7 +188,9 @@ export class PaymentsService {
     const currency = (reservation.currency ?? 'MXN').toLowerCase();
 
     if (currency !== 'mxn') {
-      throw new BadRequestException('Por seguridad, solo se permiten pagos en MXN');
+      throw new BadRequestException(
+        'Por seguridad, solo se permiten pagos en MXN',
+      );
     }
 
     const stripeAmount = this.getStripeAmountFromReservationTotal(
@@ -218,7 +242,9 @@ export class PaymentsService {
       include: {
         extras: true,
         payments: true,
-        package: true,
+        package: {
+          include: this.packageEmailInclude,
+        },
       },
     });
 
@@ -370,9 +396,7 @@ export class PaymentsService {
         extras: true,
         payments: true,
         package: {
-          include: {
-            coverMedia: true,
-          },
+          include: this.packageEmailInclude,
         },
       },
     });
@@ -415,6 +439,7 @@ export class PaymentsService {
             code: reservation.package.code,
             currency: reservation.package.currency,
             coverMedia: reservation.package.coverMedia,
+            translation: reservation.package.translations?.[0] ?? null,
           }
         : null,
       extras: reservation.extras,
@@ -434,9 +459,7 @@ export class PaymentsService {
         extras: true,
         payments: true,
         package: {
-          include: {
-            coverMedia: true,
-          },
+          include: this.packageEmailInclude,
         },
       },
     });
@@ -504,9 +527,7 @@ export class PaymentsService {
         payments: true,
         traces: true,
         package: {
-          include: {
-            coverMedia: true,
-          },
+          include: this.packageEmailInclude,
         },
       },
     });
@@ -549,6 +570,9 @@ export class PaymentsService {
       include: {
         extras: true,
         payments: true,
+        package: {
+          include: this.packageEmailInclude,
+        },
       },
     });
 
@@ -661,6 +685,9 @@ export class PaymentsService {
       include: {
         extras: true,
         payments: true,
+        package: {
+          include: this.packageEmailInclude,
+        },
       },
     });
 
@@ -832,9 +859,7 @@ export class PaymentsService {
         payments: true,
         traces: true,
         package: {
-          include: {
-            coverMedia: true,
-          },
+          include: this.packageEmailInclude,
         },
       },
     });
@@ -872,9 +897,7 @@ export class PaymentsService {
         payments: true,
         traces: true,
         package: {
-          include: {
-            coverMedia: true,
-          },
+          include: this.packageEmailInclude,
         },
       },
     });
@@ -1114,9 +1137,7 @@ export class PaymentsService {
           extras: true,
           payments: true,
           package: {
-            include: {
-              coverMedia: true,
-            },
+            include: this.packageEmailInclude,
           },
         },
       });
