@@ -11,25 +11,85 @@ import {
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
+import { ApiBody, ApiConsumes, ApiOperation } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { existsSync, mkdirSync } from 'fs';
+import { memoryStorage } from 'multer';
 import { extname } from 'path';
-import { randomUUID } from 'crypto';
 
-import { PromotionsService } from './promotions.service';
+import {
+  PromotionsService,
+  type PromotionImageUploadFile,
+} from './promotions.service';
 import { CreatePromotionDto } from './dto/create-promotion.dto';
 import { UpdatePromotionDto } from './dto/update-promotion.dto';
 import { ReorderPromotionsDto } from './dto/reorder-promotions.dto';
 
-const PROMOTION_UPLOAD_PATH = './uploads/promotions';
+function sanitizeBaseName(originalName: string) {
+  const cleaned = (originalName || 'file')
+    .replace(/\s+/g, '-')
+    .replace(/[^a-zA-Z0-9-_\.]/g, '')
+    .toLowerCase();
 
-const allowedImageMimeTypes = [
-  'image/jpeg',
-  'image/jpg',
-  'image/png',
-  'image/webp',
-];
+  const ext = extname(cleaned);
+  const base = ext ? cleaned.slice(0, -ext.length) : cleaned;
+
+  return {
+    base: (base || 'file').slice(-80),
+    ext,
+  };
+}
+
+function getExtensionFromMimeType(mimeType: string): string {
+  const extensions: Record<string, string> = {
+    'image/jpeg': '.jpg',
+    'image/jpg': '.jpg',
+    'image/png': '.png',
+    'image/webp': '.webp',
+    'image/avif': '.avif',
+    'image/gif': '.gif',
+  };
+
+  return extensions[mimeType] || '.bin';
+}
+
+function imageFileFilter(
+  _req: unknown,
+  file: { mimetype: string },
+  cb: (error: Error | null, acceptFile: boolean) => void,
+) {
+  const allowedMimeTypes = [
+    'image/jpeg',
+    'image/jpg',
+    'image/png',
+    'image/webp',
+    'image/avif',
+    'image/gif',
+  ];
+
+  if (!allowedMimeTypes.includes(file.mimetype)) {
+    return cb(
+      new BadRequestException(`Tipo de imagen no permitido: ${file.mimetype}`),
+      false,
+    );
+  }
+
+  cb(null, true);
+}
+
+function preparePromotionImageFile(
+  file: PromotionImageUploadFile,
+): PromotionImageUploadFile {
+  const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+  const { base, ext } = sanitizeBaseName(file.originalname);
+
+  const safeExt = ext || getExtensionFromMimeType(file.mimetype);
+  const filename = `${unique}-${base}${safeExt}`;
+
+  return {
+    ...file,
+    filename,
+  };
+}
 
 @Controller('promotions')
 export class PromotionsController {
@@ -55,53 +115,43 @@ export class PromotionsController {
     return this.promotionsService.reorder(dto);
   }
 
-  /**
-   * PATCH /promotions/:id/image
-   *
-   * FormData:
-   * image: File
-   */
   @Patch(':id/image')
+  @ApiOperation({
+    summary: 'Reemplazar la imagen de una promoción',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        image: {
+          type: 'string',
+          format: 'binary',
+        },
+      },
+      required: ['image'],
+    },
+  })
   @UseInterceptors(
     FileInterceptor('image', {
-      storage: diskStorage({
-        destination: (_req, _file, callback) => {
-          if (!existsSync(PROMOTION_UPLOAD_PATH)) {
-            mkdirSync(PROMOTION_UPLOAD_PATH, { recursive: true });
-          }
-
-          callback(null, PROMOTION_UPLOAD_PATH);
-        },
-        filename: (_req, file, callback) => {
-          const originalExt = extname(file.originalname).toLowerCase();
-          const safeExt = originalExt || '.jpg';
-          const filename = `promotion-${Date.now()}-${randomUUID()}${safeExt}`;
-
-          callback(null, filename);
-        },
-      }),
-      fileFilter: (_req, file, callback) => {
-        if (!allowedImageMimeTypes.includes(file.mimetype)) {
-          return callback(
-            new BadRequestException(
-              'Solo se permiten imágenes JPG, JPEG, PNG o WEBP.',
-            ),
-            false,
-          );
-        }
-
-        callback(null, true);
-      },
+      storage: memoryStorage(),
+      fileFilter: imageFileFilter,
       limits: {
-        fileSize: 5 * 1024 * 1024, // 5 MB
+        fileSize: 5 * 1024 * 1024,
       },
     }),
   )
   replaceImage(
     @Param('id') id: string,
-    @UploadedFile() file: Express.Multer.File,
+    @UploadedFile() file: PromotionImageUploadFile,
   ) {
-    return this.promotionsService.replaceImage(id, file);
+    if (!file) {
+      throw new BadRequestException('La imagen es obligatoria.');
+    }
+
+    const preparedFile = preparePromotionImageFile(file);
+
+    return this.promotionsService.replaceImage(id, preparedFile);
   }
 
   @Get(':id')

@@ -3,19 +3,28 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { PromotionSectionType } from '@prisma/client';
-import { existsSync } from 'fs';
-import { unlink } from 'fs/promises';
-import { extname, join } from 'path';
+import { MediaKind, PromotionSectionType } from '@prisma/client';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreatePromotionDto } from './dto/create-promotion.dto';
 import { UpdatePromotionDto } from './dto/update-promotion.dto';
 import { ReorderPromotionsDto } from './dto/reorder-promotions.dto';
 
+export type PromotionImageUploadFile = {
+  fieldname?: string;
+  originalname: string;
+  encoding?: string;
+  mimetype: string;
+  size: number;
+  buffer?: Buffer;
+  filename?: string;
+};
+
 @Injectable()
 export class PromotionsService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private readonly maxFileSize = 5 * 1024 * 1024;
 
   private getNow() {
     return new Date();
@@ -100,27 +109,78 @@ export class PromotionsService {
     };
   }
 
-  private normalizeFilePath(filePath: string) {
-    return filePath.replace(/\\/g, '/').replace(/^\/+/, '');
+  private getExtFromFilename(filename: string) {
+    const parts = filename.split('.');
+
+    if (parts.length <= 1) {
+      return '';
+    }
+
+    return parts.pop()?.toLowerCase() || '';
   }
 
-  private buildFileUrl(filePath: string) {
-    const cleanPath = this.normalizeFilePath(filePath);
-    return `/${cleanPath}`;
+  private validateUploadedImage(file: PromotionImageUploadFile) {
+    if (!file) {
+      throw new BadRequestException('La imagen es obligatoria.');
+    }
+
+    if (!file.buffer) {
+      throw new BadRequestException(
+        `La imagen ${file.originalname} no contiene datos en memoria.`,
+      );
+    }
+
+    if (!file.filename) {
+      throw new BadRequestException(
+        `La imagen ${file.originalname} no tiene nombre generado.`,
+      );
+    }
+
+    if (file.size > this.maxFileSize) {
+      throw new BadRequestException(
+        `La imagen ${file.originalname} supera el límite de 5 MB.`,
+      );
+    }
+
+    const allowedMimeTypes = [
+      'image/jpeg',
+      'image/jpg',
+      'image/png',
+      'image/webp',
+      'image/avif',
+      'image/gif',
+    ];
+
+    if (!allowedMimeTypes.includes(file.mimetype)) {
+      throw new BadRequestException(
+        `Tipo de imagen no permitido: ${file.mimetype}`,
+      );
+    }
   }
 
-  private async safeDeleteLocalFile(filePath?: string | null) {
-    if (!filePath) return;
+  private async deleteOldImageIfPossible(oldImageMediaId?: string | null) {
+    if (!oldImageMediaId) return;
 
     try {
-      const cleanPath = this.normalizeFilePath(filePath);
-      const absolutePath = join(process.cwd(), cleanPath);
-
-      if (existsSync(absolutePath)) {
-        await unlink(absolutePath);
-      }
+      await this.prisma.mediaAsset.delete({
+        where: {
+          id: oldImageMediaId,
+        },
+      });
     } catch (error) {
-      console.error('No se pudo eliminar la imagen anterior:', error);
+      console.warn(
+        'No se pudo eliminar la imagen anterior. Se desactivará en su lugar.',
+        error,
+      );
+
+      await this.prisma.mediaAsset.updateMany({
+        where: {
+          id: oldImageMediaId,
+        },
+        data: {
+          isActive: false,
+        },
+      });
     }
   }
 
@@ -165,7 +225,7 @@ export class PromotionsService {
         throw new NotFoundException('La imagen seleccionada no existe.');
       }
 
-      if (imageExists.kind !== 'IMAGE') {
+      if (imageExists.kind !== MediaKind.IMAGE) {
         throw new BadRequestException(
           'El archivo seleccionado no es una imagen.',
         );
@@ -264,88 +324,58 @@ export class PromotionsService {
     });
   }
 
-  /**
-   * Reemplaza la imagen de una promoción.
-   *
-   * 1. Busca la promoción.
-   * 2. Guarda la nueva imagen como mediaAsset.
-   * 3. Actualiza imageMediaId en promotion.
-   * 4. Desactiva el mediaAsset anterior.
-   * 5. Elimina el archivo físico anterior del servidor.
-   */
-  async replaceImage(id: string, file: Express.Multer.File) {
-    if (!file) {
-      throw new BadRequestException('La imagen es obligatoria.');
-    }
+  async replaceImage(id: string, file: PromotionImageUploadFile) {
+    this.validateUploadedImage(file);
 
     const promotion = await this.prisma.promotion.findUnique({
-      where: { id },
+      where: {
+        id,
+      },
       select: {
         id: true,
         imageMediaId: true,
-        imageMedia: {
-          select: {
-            id: true,
-            path: true,
-          },
-        },
       },
     });
 
     if (!promotion) {
-      await this.safeDeleteLocalFile(file.path);
       throw new NotFoundException('Promoción no encontrada.');
     }
 
-    const cleanPath = this.normalizeFilePath(file.path);
-    const fileUrl = this.buildFileUrl(cleanPath);
-    const fileExt = extname(file.originalname).replace('.', '').toLowerCase();
+    const filename = file.filename as string;
+    const buffer = file.buffer as Buffer;
 
-    try {
-      const updatedPromotion = await this.prisma.$transaction(async (tx) => {
-        const newImage = await tx.mediaAsset.create({
-          data: {
-            kind: 'IMAGE',
-            mimeType: file.mimetype,
-            ext: fileExt,
-            size: file.size,
-            originalName: file.originalname,
-            filename: file.filename,
-            path: cleanPath,
-            url: fileUrl,
-            isActive: true,
-          },
-        });
+    const oldImageMediaId = promotion.imageMediaId;
 
-        const promotionUpdated = await tx.promotion.update({
-          where: { id },
-          data: {
-            imageMediaId: newImage.id,
-          },
-          include: this.getPromotionInclude(),
-        });
-
-        if (promotion.imageMediaId) {
-          await tx.mediaAsset.update({
-            where: { id: promotion.imageMediaId },
-            data: {
-              isActive: false,
-            },
-          });
-        }
-
-        return promotionUpdated;
+    const updatedPromotion = await this.prisma.$transaction(async (tx) => {
+      const newImage = await tx.mediaAsset.create({
+        data: {
+          kind: MediaKind.IMAGE,
+          mimeType: file.mimetype,
+          ext: this.getExtFromFilename(filename),
+          size: file.size,
+          originalName: file.originalname,
+          filename,
+          path: `media/file/${filename}`,
+          url: `/media/file/${filename}`,
+          isActive: true,
+          data: new Uint8Array(buffer),
+        },
       });
 
-      if (promotion.imageMedia?.path) {
-        await this.safeDeleteLocalFile(promotion.imageMedia.path);
-      }
+      return tx.promotion.update({
+        where: {
+          id,
+        },
+        data: {
+          imageMediaId: newImage.id,
+        },
+        include: this.getPromotionInclude(),
+      });
+    });
 
-      return updatedPromotion;
-    } catch (error) {
-      await this.safeDeleteLocalFile(file.path);
-      throw error;
-    }
+    await this.deleteOldImageIfPossible(oldImageMediaId);
+
+    return updatedPromotion;
   }
 
   async remove(id: string) {
