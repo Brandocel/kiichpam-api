@@ -4,6 +4,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PromotionSectionType } from '@prisma/client';
+import { existsSync } from 'fs';
+import { unlink } from 'fs/promises';
+import { extname, join } from 'path';
+
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreatePromotionDto } from './dto/create-promotion.dto';
 import { UpdatePromotionDto } from './dto/update-promotion.dto';
@@ -94,6 +98,30 @@ export class PromotionsService {
         },
       ],
     };
+  }
+
+  private normalizeFilePath(filePath: string) {
+    return filePath.replace(/\\/g, '/').replace(/^\/+/, '');
+  }
+
+  private buildFileUrl(filePath: string) {
+    const cleanPath = this.normalizeFilePath(filePath);
+    return `/${cleanPath}`;
+  }
+
+  private async safeDeleteLocalFile(filePath?: string | null) {
+    if (!filePath) return;
+
+    try {
+      const cleanPath = this.normalizeFilePath(filePath);
+      const absolutePath = join(process.cwd(), cleanPath);
+
+      if (existsSync(absolutePath)) {
+        await unlink(absolutePath);
+      }
+    } catch (error) {
+      console.error('No se pudo eliminar la imagen anterior:', error);
+    }
   }
 
   private async validateRelations(dto: {
@@ -234,6 +262,90 @@ export class PromotionsService {
       },
       include: this.getPromotionInclude(),
     });
+  }
+
+  /**
+   * Reemplaza la imagen de una promoción.
+   *
+   * 1. Busca la promoción.
+   * 2. Guarda la nueva imagen como mediaAsset.
+   * 3. Actualiza imageMediaId en promotion.
+   * 4. Desactiva el mediaAsset anterior.
+   * 5. Elimina el archivo físico anterior del servidor.
+   */
+  async replaceImage(id: string, file: Express.Multer.File) {
+    if (!file) {
+      throw new BadRequestException('La imagen es obligatoria.');
+    }
+
+    const promotion = await this.prisma.promotion.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        imageMediaId: true,
+        imageMedia: {
+          select: {
+            id: true,
+            path: true,
+          },
+        },
+      },
+    });
+
+    if (!promotion) {
+      await this.safeDeleteLocalFile(file.path);
+      throw new NotFoundException('Promoción no encontrada.');
+    }
+
+    const cleanPath = this.normalizeFilePath(file.path);
+    const fileUrl = this.buildFileUrl(cleanPath);
+    const fileExt = extname(file.originalname).replace('.', '').toLowerCase();
+
+    try {
+      const updatedPromotion = await this.prisma.$transaction(async (tx) => {
+        const newImage = await tx.mediaAsset.create({
+          data: {
+            kind: 'IMAGE',
+            mimeType: file.mimetype,
+            ext: fileExt,
+            size: file.size,
+            originalName: file.originalname,
+            filename: file.filename,
+            path: cleanPath,
+            url: fileUrl,
+            isActive: true,
+          },
+        });
+
+        const promotionUpdated = await tx.promotion.update({
+          where: { id },
+          data: {
+            imageMediaId: newImage.id,
+          },
+          include: this.getPromotionInclude(),
+        });
+
+        if (promotion.imageMediaId) {
+          await tx.mediaAsset.update({
+            where: { id: promotion.imageMediaId },
+            data: {
+              isActive: false,
+            },
+          });
+        }
+
+        return promotionUpdated;
+      });
+
+      if (promotion.imageMedia?.path) {
+        await this.safeDeleteLocalFile(promotion.imageMedia.path);
+      }
+
+      return updatedPromotion;
+    } catch (error) {
+      await this.safeDeleteLocalFile(file.path);
+      throw error;
+    }
   }
 
   async remove(id: string) {
