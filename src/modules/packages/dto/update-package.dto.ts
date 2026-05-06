@@ -1,5 +1,12 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsInt, IsObject, IsOptional, IsString, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsInt,
+  IsObject,
+  IsOptional,
+  IsString,
+  Min,
+} from 'class-validator';
 
 class AgeRulesDto {
   @ApiPropertyOptional({ example: 12 })
@@ -8,7 +15,7 @@ class AgeRulesDto {
   @Min(0)
   adultMin?: number;
 
-  @ApiPropertyOptional({ example: 4 })
+  @ApiPropertyOptional({ example: 5 })
   @IsOptional()
   @IsInt()
   @Min(0)
@@ -20,7 +27,7 @@ class AgeRulesDto {
   @Min(0)
   childMax?: number;
 
-  @ApiPropertyOptional({ example: 3 })
+  @ApiPropertyOptional({ example: 4 })
   @IsOptional()
   @IsInt()
   @Min(0)
@@ -39,7 +46,7 @@ export class UpdatePackageDto {
   @Min(0)
   adultPriceMXN?: number;
 
-  @ApiPropertyOptional({ example: 0 })
+  @ApiPropertyOptional({ example: 9900 })
   @IsOptional()
   @IsInt()
   @Min(0)
@@ -51,24 +58,30 @@ export class UpdatePackageDto {
   @Min(0)
   infantPriceMXN?: number;
 
+  @ApiPropertyOptional({ example: 10900 })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  inapamPriceMXN?: number;
+
   @ApiPropertyOptional({ example: 'MXN' })
   @IsOptional()
   @IsString()
   currency?: string;
 
-  @ApiPropertyOptional({ example: 10 })
+  @ApiPropertyOptional({ example: 999 })
   @IsOptional()
   @IsInt()
   @Min(0)
   maxAdults?: number;
 
-  @ApiPropertyOptional({ example: 5 })
+  @ApiPropertyOptional({ example: 999 })
   @IsOptional()
   @IsInt()
   @Min(0)
   maxChildren?: number;
 
-  @ApiPropertyOptional({ example: 3 })
+  @ApiPropertyOptional({ example: 999 })
   @IsOptional()
   @IsInt()
   @Min(0)

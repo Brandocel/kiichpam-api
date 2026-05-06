@@ -8,7 +8,6 @@ import {
   IsString,
   Min,
   ValidateNested,
-  IsObject,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -64,7 +63,7 @@ class AgeRulesDto {
   @Min(0)
   adultMin: number;
 
-  @ApiProperty({ example: 4 })
+  @ApiProperty({ example: 5 })
   @IsInt()
   @Min(0)
   childMin: number;
@@ -74,7 +73,7 @@ class AgeRulesDto {
   @Min(0)
   childMax: number;
 
-  @ApiProperty({ example: 3 })
+  @ApiProperty({ example: 4 })
   @IsInt()
   @Min(0)
   infantMax: number;
@@ -143,36 +142,42 @@ export class CreatePackageDto {
   @Min(0)
   adultPriceMXN: number;
 
-  @ApiPropertyOptional({ example: 0 })
+  @ApiPropertyOptional({ example: 9900, description: 'centavos => $99.00' })
   @IsOptional()
   @IsInt()
   @Min(0)
   childPriceMXN?: number;
 
-  @ApiPropertyOptional({ example: 0 })
+  @ApiPropertyOptional({ example: 0, description: 'centavos => $0.00' })
   @IsOptional()
   @IsInt()
   @Min(0)
   infantPriceMXN?: number;
+
+  @ApiPropertyOptional({ example: 10900, description: 'centavos => $109.00' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  inapamPriceMXN?: number;
 
   @ApiPropertyOptional({ example: 'MXN' })
   @IsOptional()
   @IsString()
   currency?: string;
 
-  @ApiPropertyOptional({ example: 10 })
+  @ApiPropertyOptional({ example: 999 })
   @IsOptional()
   @IsInt()
   @Min(0)
   maxAdults?: number;
 
-  @ApiPropertyOptional({ example: 5 })
+  @ApiPropertyOptional({ example: 999 })
   @IsOptional()
   @IsInt()
   @Min(0)
   maxChildren?: number;
 
-  @ApiPropertyOptional({ example: 3 })
+  @ApiPropertyOptional({ example: 999 })
   @IsOptional()
   @IsInt()
   @Min(0)

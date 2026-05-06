@@ -21,6 +21,7 @@ type ResolvedExtra = {
 type PrimaryCampaignForPricing = {
   code: string;
   stackable: boolean;
+  fixedInapamPriceMXN: number | null;
 } | null;
 
 @Injectable()
@@ -114,18 +115,35 @@ export class ReservationPricingService {
       payableAdults,
     );
 
-    const effectiveAdultUnitPrice =
+    const effectiveAdultUnitPriceMXN =
       payableAdults > 0
         ? Math.floor(campaignResult.campaignPricing.adultTotal / payableAdults)
         : 0;
 
+    const fallbackInapamUnitPriceMXN = Math.max(
+      effectiveAdultUnitPriceMXN -
+        Math.floor(
+          effectiveAdultUnitPriceMXN *
+            (ReservationPricingService.INAPAM_PERCENT / 100),
+        ),
+      0,
+    );
+
+    const regularInapamUnitPriceMXN =
+      pkg.inapamPriceMXN ?? fallbackInapamUnitPriceMXN;
+
+    const campaignInapamUnitPriceMXN =
+      primaryCampaign?.fixedInapamPriceMXN ?? regularInapamUnitPriceMXN;
+
+    const inapamUnitPriceMXN =
+      requestedInapamVisitors > 0 && canCombineInapamWithCampaign
+        ? campaignInapamUnitPriceMXN
+        : effectiveAdultUnitPriceMXN;
+
     const inapamDiscountMXN =
       requestedInapamVisitors > 0 && canCombineInapamWithCampaign
-        ? Math.floor(
-            requestedInapamVisitors *
-              effectiveAdultUnitPrice *
-              (ReservationPricingService.INAPAM_PERCENT / 100),
-          )
+        ? requestedInapamVisitors *
+          Math.max(effectiveAdultUnitPriceMXN - inapamUnitPriceMXN, 0)
         : 0;
 
     const subtotalAfterInapam = Math.max(
@@ -195,6 +213,7 @@ export class ReservationPricingService {
         adults: dto.adults,
         children: dto.children,
         infants: dto.infants,
+        inapamVisitors: requestedInapamVisitors,
         payableAdults: campaignResult.campaignPricing.payableAdults,
         payableChildren: campaignResult.campaignPricing.payableChildren,
         payableInfants: campaignResult.campaignPricing.payableInfants,
@@ -217,6 +236,7 @@ export class ReservationPricingService {
         adultPriceMXN: pkg.adultPriceMXN,
         childPriceMXN: pkg.childPriceMXN,
         infantPriceMXN: pkg.infantPriceMXN,
+        inapamPriceMXN: pkg.inapamPriceMXN,
 
         campaignAdultTotalMXN: campaignResult.campaignPricing.adultTotal,
         campaignChildTotalMXN: campaignResult.campaignPricing.childTotal,
@@ -233,6 +253,11 @@ export class ReservationPricingService {
         inapamVisitors: requestedInapamVisitors,
         inapamDiscountMXN,
 
+        effectiveAdultUnitPriceMXN,
+        regularInapamUnitPriceMXN,
+        campaignInapamUnitPriceMXN,
+        inapamUnitPriceMXN,
+
         couponDiscountMXN,
         discountMXN: totalDiscountMXN,
         totalMXN,
@@ -245,6 +270,9 @@ export class ReservationPricingService {
 
         primaryCampaignCode: campaignResult.primaryCampaignCode,
         primaryCampaignStackable: primaryCampaign?.stackable ?? null,
+        primaryCampaignFixedInapamPriceMXN:
+          primaryCampaign?.fixedInapamPriceMXN ?? null,
+
         inapamRequested: requestedInapamVisitors > 0,
         inapamCanCombineWithCampaign: canCombineInapamWithCampaign,
         inapamApplied: inapamDiscountMXN > 0,
@@ -274,6 +302,7 @@ export class ReservationPricingService {
       select: {
         code: true,
         stackable: true,
+        fixedInapamPriceMXN: true,
       },
     });
 

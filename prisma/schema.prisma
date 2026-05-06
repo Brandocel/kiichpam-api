@@ -72,14 +72,15 @@ model User {
 }
 
 model Package {
-  id       String  @id @default(uuid())
-  code     String  @unique
-  isActive Boolean @default(true)
+  id               String                   @id @default(uuid())
+  code             String                   @unique
+  isActive         Boolean                  @default(true)
   promotionOptions PromotionPackageOption[]
 
   adultPriceMXN  Int
-  childPriceMXN  Int @default(0)
-  infantPriceMXN Int @default(0)
+  childPriceMXN  Int  @default(0)
+  infantPriceMXN Int  @default(0)
+  inapamPriceMXN Int?
 
   currency String @default("MXN")
 
@@ -94,7 +95,7 @@ model Package {
   campaigns    Campaign[]
   reservations Reservation[]
   coupons      Coupon[]
-  promotions Promotion[]
+  promotions   Promotion[]
 
   coverMediaId String?
   coverMedia   MediaAsset? @relation("PackageCover", fields: [coverMediaId], references: [id], onDelete: SetNull)
@@ -147,12 +148,12 @@ model PackageExtraTranslation {
 }
 
 model Campaign {
-  id       String  @id @default(uuid())
-  code     String  @unique
-  name     String
-  source   String?
-  isActive Boolean @default(true)
-  promotions Promotion[]
+  id               String                   @id @default(uuid())
+  code             String                   @unique
+  name             String
+  source           String?
+  isActive         Boolean                  @default(true)
+  promotions       Promotion[]
   promotionOptions PromotionPackageOption[]
 
   packageId String?
@@ -175,6 +176,7 @@ model Campaign {
   fixedAdultPriceMXN  Int?
   fixedChildPriceMXN  Int?
   fixedInfantPriceMXN Int?
+  fixedInapamPriceMXN Int?
 
   discountPercent Int?
 
@@ -386,16 +388,16 @@ model Coupon {
 }
 
 model MediaAsset {
-  id           String    @id @default(uuid())
-  kind         MediaKind
-  mimeType     String
-  ext          String
-  size         Int
-  originalName String
-  filename     String    @unique
-  path         String
-  url          String
-  isActive     Boolean   @default(true)
+  id              String      @id @default(uuid())
+  kind            MediaKind
+  mimeType        String
+  ext             String
+  size            Int
+  originalName    String
+  filename        String      @unique
+  path            String
+  url             String
+  isActive        Boolean     @default(true)
   promotionImages Promotion[]
 
   data Bytes?
@@ -568,8 +570,8 @@ enum PromotionSectionType {
 model Promotion {
   id String @id @default(uuid())
 
-  code     String  @unique
-  isActive Boolean @default(true)
+  code           String                   @unique
+  isActive       Boolean                  @default(true)
   packageOptions PromotionPackageOption[]
 
   sectionType PromotionSectionType @default(STANDARD)
@@ -587,12 +589,12 @@ model Promotion {
   startAt DateTime?
   endAt   DateTime?
 
-  packageId String?
-  campaignId String?
+  packageId    String?
+  campaignId   String?
   imageMediaId String?
 
-  package Package? @relation(fields: [packageId], references: [id], onDelete: SetNull)
-  campaign Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  package    Package?    @relation(fields: [packageId], references: [id], onDelete: SetNull)
+  campaign   Campaign?   @relation(fields: [campaignId], references: [id], onDelete: SetNull)
   imageMedia MediaAsset? @relation(fields: [imageMediaId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
@@ -607,7 +609,6 @@ model Promotion {
   @@index([packageId])
   @@index([campaignId])
   @@index([imageMediaId])
-
   @@map("promotions")
 }
 
@@ -622,7 +623,7 @@ model PromotionPackageOption {
   description String?
 
   displayPriceMXN Int?
-  order           Int @default(0)
+  order           Int     @default(0)
   isActive        Boolean @default(true)
 
   promotion Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
@@ -637,6 +638,5 @@ model PromotionPackageOption {
   @@index([campaignId])
   @@index([isActive])
   @@index([order])
-
   @@map("promotion_package_options")
 }
