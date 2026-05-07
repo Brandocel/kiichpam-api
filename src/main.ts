@@ -8,6 +8,7 @@ import { existsSync, mkdirSync } from 'fs';
 
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { swaggerBasicAuth } from './common/middlewares/swagger-basic-auth.middleware';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -51,6 +52,8 @@ async function bootstrap() {
       'stripe-signature',
       'Accept',
       'Origin',
+      'x-api-key',
+      'x-api-secret',
     ],
     optionsSuccessStatus: 204,
   });
@@ -77,15 +80,78 @@ async function bootstrap() {
   app.useGlobalInterceptors(new ResponseInterceptor());
   app.useGlobalFilters(new HttpExceptionFilter());
 
+  /**
+   * Protección de Swagger.
+   * Primero protege la ruta y después monta Swagger.
+   */
+  app.use('/docs', swaggerBasicAuth);
+  app.use('/docs-json', swaggerBasicAuth);
+  app.use('/docs-yaml', swaggerBasicAuth);
+
   const config = new DocumentBuilder()
     .setTitle('Kiichpam API')
     .setDescription('API de reservaciones de paquetes')
     .setVersion('1.0.0')
-    .addBearerAuth()
+
+    /**
+     * Para un futuro login administrativo con JWT.
+     * Ojo: esto solo documenta Swagger, no protege rutas por sí solo.
+     */
+    .addBearerAuth(
+      {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+        description: 'Token JWT para endpoints administrativos.',
+      },
+      'bearer',
+    )
+
+    /**
+     * Seguridad recomendada para integraciones externas.
+     * Username = API_CLIENT_KEY
+     * Password = API_CLIENT_SECRET
+     */
+    .addBasicAuth(
+      {
+        type: 'http',
+        scheme: 'basic',
+        description:
+          'Basic Auth para integraciones. Usa API_CLIENT_KEY como usuario y API_CLIENT_SECRET como contraseña.',
+      },
+      'integration-basic',
+    )
+
+    /**
+     * Alternativa para integraciones externas usando headers.
+     */
+    .addApiKey(
+      {
+        type: 'apiKey',
+        name: 'x-api-key',
+        in: 'header',
+        description: 'Llave pública de integración.',
+      },
+      'x-api-key',
+    )
+    .addApiKey(
+      {
+        type: 'apiKey',
+        name: 'x-api-secret',
+        in: 'header',
+        description: 'Llave secreta de integración.',
+      },
+      'x-api-secret',
+    )
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('docs', app, document);
+
+  SwaggerModule.setup('docs', app, document, {
+    swaggerOptions: {
+      persistAuthorization: true,
+    },
+  });
 
   const port = Number(process.env.PORT) || 8080;
   const publicUrl = process.env.APP_URL || `http://localhost:${port}`;

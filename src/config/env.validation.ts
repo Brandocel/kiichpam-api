@@ -1,5 +1,5 @@
 import { plainToInstance } from 'class-transformer';
-import { IsNotEmpty, IsOptional, IsString, validateSync } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString, MinLength, validateSync } from 'class-validator';
 
 class EnvVars {
   @IsString()
@@ -9,6 +9,10 @@ class EnvVars {
   @IsString()
   @IsOptional()
   PORT?: string;
+
+  @IsString()
+  @IsOptional()
+  APP_URL?: string;
 
   @IsString()
   @IsNotEmpty()
@@ -25,6 +29,34 @@ class EnvVars {
   @IsString()
   @IsOptional()
   CORS_ORIGIN?: string;
+
+  /**
+   * Seguridad para integraciones externas.
+   * Estas credenciales reemplazan el modelo antiguo de consumer_key y consumer_secret en URL.
+   */
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(10)
+  API_CLIENT_KEY!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(32)
+  API_CLIENT_SECRET!: string;
+
+  /**
+   * Seguridad para Swagger.
+   * Esto protege /docs para que no quede público.
+   */
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(4)
+  SWAGGER_USER!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(12)
+  SWAGGER_PASSWORD!: string;
 
   @IsString()
   @IsNotEmpty()

@@ -9,17 +9,23 @@ import {
   Put,
   Query,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiBody, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiBody, ApiQuery, ApiTags } from '@nestjs/swagger';
+
 import { PackagesService } from './packages.service';
 import { CreatePackageDto } from './dto/create-package.dto';
 import { SetPackageCoverDto } from './dto/set-package-cover.dto';
 import { UpdatePackageDto } from './dto/update-package.dto';
+import { IntegrationProtected } from '../../common/decorators/integration-protected.decorator';
 
 @ApiTags('Packages')
 @Controller('packages')
 export class PackagesController {
   constructor(private readonly service: PackagesService) {}
 
+  /**
+   * Público.
+   * Lo usa la web para mostrar paquetes.
+   */
   @Get()
   @ApiQuery({ name: 'lang', required: false, example: 'es' })
   @ApiQuery({ name: 'adults', required: false, example: 2 })
@@ -52,6 +58,10 @@ export class PackagesController {
     });
   }
 
+  /**
+   * Público.
+   * Lo usa la web para mostrar detalle de un paquete.
+   */
   @Get(':code')
   @ApiQuery({ name: 'lang', required: false, example: 'es' })
   @ApiQuery({ name: 'adults', required: false, example: 2 })
@@ -85,41 +95,66 @@ export class PackagesController {
     });
   }
 
+  /**
+   * Protegido.
+   * Crear paquetes no debe ser público.
+   */
   @Post()
+  @IntegrationProtected()
   @ApiBody({ type: CreatePackageDto })
   create(@Body() dto: CreatePackageDto) {
     return this.service.create(dto);
   }
 
+  /**
+   * Protegido.
+   * Reemplazar paquete no debe ser público.
+   */
   @Put(':code')
-  @ApiBearerAuth()
+  @IntegrationProtected()
   @ApiBody({ type: CreatePackageDto })
   replace(@Param('code') code: string, @Body() dto: CreatePackageDto) {
     return this.service.replaceByCode(code, dto);
   }
 
+  /**
+   * Protegido.
+   * Modificar portada no debe ser público.
+   */
   @Patch(':code/cover')
-  @ApiBearerAuth()
+  @IntegrationProtected()
   @ApiBody({ type: SetPackageCoverDto })
   setCover(@Param('code') code: string, @Body() dto: SetPackageCoverDto) {
     return this.service.setCoverImage(code, dto.mediaId);
   }
 
+  /**
+   * Protegido.
+   * Eliminar portada no debe ser público.
+   */
   @Delete(':code/cover')
-  @ApiBearerAuth()
+  @IntegrationProtected()
   removeCover(@Param('code') code: string) {
     return this.service.removeCoverImage(code);
   }
 
+  /**
+   * Protegido.
+   * Actualizar paquete no debe ser público.
+   */
   @Patch(':code')
-  @ApiBearerAuth()
+  @IntegrationProtected()
   @ApiBody({ type: UpdatePackageDto })
   update(@Param('code') code: string, @Body() dto: UpdatePackageDto) {
     return this.service.updateByCode(code, dto);
   }
 
+  /**
+   * Protegido.
+   * Borrado lógico no debe ser público.
+   */
   @Delete(':code')
-  @ApiBearerAuth()
+  @IntegrationProtected()
   softDelete(@Param('code') code: string) {
     return this.service.softDeleteByCode(code);
   }

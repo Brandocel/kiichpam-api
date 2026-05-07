@@ -1,5 +1,10 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ConfigModule } from '@nestjs/config';
+
+import configuration from './config/configuration';
+import { validateEnv } from './config/env.validation';
+
 import { PrismaModule } from './prisma/prisma.module';
 import { HealthModule } from './modules/health/health.module';
 import { PackagesModule } from './modules/packages/packages.module';
@@ -19,7 +24,14 @@ import { ContactModule } from './modules/contact/contact.module';
 
 @Module({
   imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+      load: [configuration],
+      validate: validateEnv,
+    }),
+
     ScheduleModule.forRoot(),
+
     PrismaModule,
     HealthModule,
     PackagesModule,

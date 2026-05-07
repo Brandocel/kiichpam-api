@@ -7,13 +7,19 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { Request } from 'express';
+
 import { PaymentsService } from './payments.service';
+import { IntegrationProtected } from '../../common/decorators/integration-protected.decorator';
 
 @ApiTags('Payments')
 @common.Controller('payments')
 export class PaymentsController {
   constructor(private readonly paymentsService: PaymentsService) {}
 
+  /**
+   * Público controlado.
+   * Lo puede usar el checkout para crear el PaymentIntent.
+   */
   @common.Post('intent')
   @ApiOperation({ summary: 'Crear PaymentIntent de Stripe para una reservación' })
   @ApiBody({
@@ -29,6 +35,10 @@ export class PaymentsController {
     return this.paymentsService.createIntent(body.folio);
   }
 
+  /**
+   * Público controlado.
+   * Lo puede usar el checkout para generar referencia OXXO.
+   */
   @common.Post('oxxo-reference')
   @ApiOperation({ summary: 'Generar referencia OXXO para una reservación' })
   @ApiBody({
@@ -44,6 +54,10 @@ export class PaymentsController {
     return this.paymentsService.createOxxoReference(body.folio);
   }
 
+  /**
+   * Público controlado.
+   * Consulta por folio. Si quieres hacerlo privado, también le ponemos @IntegrationProtected().
+   */
   @common.Get('status/:folio')
   @ApiOperation({ summary: 'Consultar estado de pago de una reservación' })
   @ApiParam({
@@ -55,7 +69,12 @@ export class PaymentsController {
     return this.paymentsService.getPaymentStatusByFolio(folio);
   }
 
+  /**
+   * Protegido.
+   * Este endpoint es administrativo.
+   */
   @common.Post('sync')
+  @IntegrationProtected()
   @ApiOperation({ summary: 'Sincronizar manualmente estado de pago desde Stripe' })
   @ApiBody({
     schema: {
@@ -70,7 +89,12 @@ export class PaymentsController {
     return this.paymentsService.syncPaymentStatusFromStripe(body.folio);
   }
 
+  /**
+   * Protegido.
+   * Nunca dejes público un refund.
+   */
   @common.Post('refund')
+  @IntegrationProtected()
   @ApiOperation({ summary: 'Reembolsar un pago exitoso en Stripe' })
   @ApiBody({
     schema: {
@@ -99,7 +123,12 @@ export class PaymentsController {
     return this.paymentsService.refundPayment(body);
   }
 
+  /**
+   * Protegido.
+   * Cancelar PaymentIntent es acción administrativa.
+   */
   @common.Post('cancel')
+  @IntegrationProtected()
   @ApiOperation({ summary: 'Cancelar un PaymentIntent no completado' })
   @ApiBody({
     schema: {
@@ -114,6 +143,11 @@ export class PaymentsController {
     return this.paymentsService.cancelPayment(body.folio);
   }
 
+  /**
+   * IMPORTANTE:
+   * Este endpoint NO se protege con API Key.
+   * Stripe lo valida con Stripe-Signature dentro del service.
+   */
   @common.Post('webhook')
   @ApiExcludeEndpoint()
   @common.HttpCode(200)
