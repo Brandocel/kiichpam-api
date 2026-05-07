@@ -32,6 +32,7 @@ export class PackagesService {
       adultPriceMXN: p.adultPriceMXN,
       childPriceMXN: p.childPriceMXN,
       infantPriceMXN: p.infantPriceMXN,
+      inapamPriceMXN: p.inapamPriceMXN,
 
       currency: p.currency,
 
@@ -421,6 +422,8 @@ export class PackagesService {
           adultPriceMXN: dto.adultPriceMXN,
           childPriceMXN: dto.childPriceMXN ?? 0,
           infantPriceMXN: dto.infantPriceMXN ?? 0,
+          inapamPriceMXN: dto.inapamPriceMXN ?? null,
+
           currency: dto.currency ?? 'MXN',
 
           maxAdults: dto.maxAdults ?? null,
@@ -511,21 +514,33 @@ export class PackagesService {
       where: { code },
       data: {
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+
         ...(dto.adultPriceMXN !== undefined
           ? { adultPriceMXN: dto.adultPriceMXN }
           : {}),
+
         ...(dto.childPriceMXN !== undefined
           ? { childPriceMXN: dto.childPriceMXN }
           : {}),
+
         ...(dto.infantPriceMXN !== undefined
           ? { infantPriceMXN: dto.infantPriceMXN }
           : {}),
+
+        ...(dto.inapamPriceMXN !== undefined
+          ? { inapamPriceMXN: dto.inapamPriceMXN }
+          : {}),
+
         ...(dto.currency !== undefined ? { currency: dto.currency } : {}),
+
         ...(dto.maxAdults !== undefined ? { maxAdults: dto.maxAdults } : {}),
+
         ...(dto.maxChildren !== undefined
           ? { maxChildren: dto.maxChildren }
           : {}),
+
         ...(dto.maxInfants !== undefined ? { maxInfants: dto.maxInfants } : {}),
+
         ...(dto.ageRules !== undefined ? { ageRules: dto.ageRules as any } : {}),
       },
       include: {
@@ -598,6 +613,8 @@ export class PackagesService {
         adultPriceMXN: dto.adultPriceMXN,
         childPriceMXN: dto.childPriceMXN ?? 0,
         infantPriceMXN: dto.infantPriceMXN ?? 0,
+        inapamPriceMXN: dto.inapamPriceMXN ?? null,
+
         currency: dto.currency ?? 'MXN',
 
         maxAdults: dto.maxAdults ?? null,
