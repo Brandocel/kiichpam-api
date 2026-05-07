@@ -22,6 +22,7 @@ type PackageWithRelations = {
   adultPriceMXN: number;
   childPriceMXN: number;
   infantPriceMXN: number;
+  inapamPriceMXN: number | null;
   currency: string;
   ageRules: any;
   maxAdults: number | null;
@@ -121,6 +122,7 @@ export class CampaignsService {
     fixedAdultPriceMXN?: number | null;
     fixedChildPriceMXN?: number | null;
     fixedInfantPriceMXN?: number | null;
+    fixedInapamPriceMXN?: number | null;
     discountPercent?: number | null;
     payQty?: number | null;
     takeQty?: number | null;
@@ -137,7 +139,8 @@ export class CampaignsService {
         if (
           data.fixedAdultPriceMXN == null &&
           data.fixedChildPriceMXN == null &&
-          data.fixedInfantPriceMXN == null
+          data.fixedInfantPriceMXN == null &&
+          data.fixedInapamPriceMXN == null
         ) {
           throw new BadRequestException(
             'FIXED_PRICE requires at least one fixed price',
@@ -185,6 +188,7 @@ export class CampaignsService {
 
   private toStringArray(value: unknown): string[] {
     if (!Array.isArray(value)) return [];
+
     return value
       .filter((item) => typeof item === 'string')
       .map((item) => item.trim())
@@ -197,11 +201,17 @@ export class CampaignsService {
 
   private removeItems(base: string[], toRemove: string[]): string[] {
     const removeSet = new Set(toRemove.map((x) => x.trim().toLowerCase()));
+
     return base.filter((x) => !removeSet.has(x.trim().toLowerCase()));
   }
 
-  private mergeItems(base: string[], toAdd: string[], toRemove: string[]): string[] {
+  private mergeItems(
+    base: string[],
+    toAdd: string[],
+    toRemove: string[],
+  ): string[] {
     const removed = this.removeItems(base, toRemove);
+
     return this.uniqueStrings([...removed, ...toAdd]);
   }
 
@@ -233,12 +243,30 @@ export class CampaignsService {
       isActive: item.isActive,
       startAt: item.startAt,
       endAt: item.endAt,
+
+      fixedAdultPriceMXN: item.fixedAdultPriceMXN,
+      fixedChildPriceMXN: item.fixedChildPriceMXN,
+      fixedInfantPriceMXN: item.fixedInfantPriceMXN,
+      fixedInapamPriceMXN: item.fixedInapamPriceMXN,
+
+      discountPercent: item.discountPercent,
+      payQty: item.payQty,
+      takeQty: item.takeQty,
+
+      minAdults: item.minAdults,
+      minChildren: item.minChildren,
+      minInfants: item.minInfants,
+
+      maxUses: item.maxUses,
+      usedCount: item.usedCount,
+
       package: item.package
         ? {
             id: item.package.id,
             code: item.package.code,
           }
         : null,
+
       translations: (item.translations ?? []).map((t: any) => ({
         lang: t.lang,
         promoName: t.promoName,
@@ -315,6 +343,7 @@ export class CampaignsService {
     let chosenPriceCampaigns: any[] = [];
 
     const nonStackablePrice = priceCandidates.filter((c) => !c.stackable);
+
     if (nonStackablePrice.length > 0) {
       chosenPriceCampaigns = [nonStackablePrice[0]];
     } else {
@@ -422,12 +451,15 @@ export class CampaignsService {
         if (affectsAdults && campaign.fixedAdultPriceMXN != null) {
           adultTotal = adults * campaign.fixedAdultPriceMXN;
         }
+
         if (affectsChildren && campaign.fixedChildPriceMXN != null) {
           childTotal = children * campaign.fixedChildPriceMXN;
         }
+
         if (affectsInfants && campaign.fixedInfantPriceMXN != null) {
           infantTotal = infants * campaign.fixedInfantPriceMXN;
         }
+
         break;
 
       case CampaignRuleType.PERCENT_DISCOUNT: {
@@ -436,12 +468,15 @@ export class CampaignsService {
         if (affectsAdults) {
           adultTotal = Math.round(adultTotal * (1 - discount));
         }
+
         if (affectsChildren) {
           childTotal = Math.round(childTotal * (1 - discount));
         }
+
         if (affectsInfants) {
           infantTotal = Math.round(infantTotal * (1 - discount));
         }
+
         break;
       }
 
@@ -825,6 +860,10 @@ export class CampaignsService {
         audience: c.audience,
         stackable: c.stackable,
         autoApply: c.autoApply,
+        fixedAdultPriceMXN: c.fixedAdultPriceMXN,
+        fixedChildPriceMXN: c.fixedChildPriceMXN,
+        fixedInfantPriceMXN: c.fixedInfantPriceMXN,
+        fixedInapamPriceMXN: c.fixedInapamPriceMXN,
         package: c.package
           ? {
               id: c.package.id,
@@ -848,6 +887,7 @@ export class CampaignsService {
           infants > 0
             ? Math.round(campaignPricing.infantTotal / Math.max(infants, 1))
             : pkg.infantPriceMXN,
+        inapamPriceMXN: pkg.inapamPriceMXN,
       },
     };
   }
@@ -874,6 +914,7 @@ export class CampaignsService {
           adultPriceMXN: result.packageEntity.adultPriceMXN,
           childPriceMXN: result.packageEntity.childPriceMXN,
           infantPriceMXN: result.packageEntity.infantPriceMXN,
+          inapamPriceMXN: result.packageEntity.inapamPriceMXN,
           image: result.packageEntity.coverMedia,
           translation: result.packageEntity.translations?.[0] ?? null,
         },
@@ -892,6 +933,7 @@ export class CampaignsService {
           adultPriceMXN: result.effectiveUnitPrices.adultPriceMXN,
           childPriceMXN: result.effectiveUnitPrices.childPriceMXN,
           infantPriceMXN: result.effectiveUnitPrices.infantPriceMXN,
+          inapamPriceMXN: result.effectiveUnitPrices.inapamPriceMXN,
         },
         pricing: {
           base: result.basePricing,
@@ -1017,6 +1059,7 @@ export class CampaignsService {
       fixedAdultPriceMXN: dto.fixedAdultPriceMXN ?? null,
       fixedChildPriceMXN: dto.fixedChildPriceMXN ?? null,
       fixedInfantPriceMXN: dto.fixedInfantPriceMXN ?? null,
+      fixedInapamPriceMXN: dto.fixedInapamPriceMXN ?? null,
       discountPercent: dto.discountPercent ?? null,
       payQty: dto.payQty ?? null,
       takeQty: dto.takeQty ?? null,
@@ -1032,6 +1075,7 @@ export class CampaignsService {
 
     if (dto.translations?.length) {
       const langs = dto.translations.map((t) => t.lang);
+
       if (new Set(langs).size !== langs.length) {
         throw new BadRequestException(
           'Duplicated lang in campaign translations',
@@ -1061,26 +1105,33 @@ export class CampaignsService {
         priority: dto.priority ?? 0,
         autoApply: dto.autoApply ?? true,
         stackable: dto.stackable ?? false,
+
         fixedAdultPriceMXN: dto.fixedAdultPriceMXN ?? null,
         fixedChildPriceMXN: dto.fixedChildPriceMXN ?? null,
         fixedInfantPriceMXN: dto.fixedInfantPriceMXN ?? null,
+        fixedInapamPriceMXN: dto.fixedInapamPriceMXN ?? null,
+
         discountPercent: dto.discountPercent ?? null,
+
         payQty:
           ruleType === CampaignRuleType.TWO_FOR_ONE
             ? 1
             : ruleType === CampaignRuleType.THREE_FOR_TWO
               ? 2
               : dto.payQty ?? null,
+
         takeQty:
           ruleType === CampaignRuleType.TWO_FOR_ONE
             ? 2
             : ruleType === CampaignRuleType.THREE_FOR_TWO
               ? 3
               : dto.takeQty ?? null,
+
         minAdults: dto.minAdults ?? null,
         minChildren: dto.minChildren ?? null,
         minInfants: dto.minInfants ?? null,
         maxUses: dto.maxUses ?? null,
+
         translations: dto.translations?.length
           ? {
               create: dto.translations.map((t) => ({
@@ -1157,28 +1208,39 @@ export class CampaignsService {
 
     const mergedCategory = (dto.category ??
       campaign.category) as CampaignCategory;
+
     const mergedRuleType = (dto.ruleType ??
       campaign.ruleType) as CampaignRuleType;
 
     this.validateRule({
       category: mergedCategory,
       ruleType: mergedRuleType,
+
       fixedAdultPriceMXN:
         dto.fixedAdultPriceMXN !== undefined
           ? dto.fixedAdultPriceMXN
           : campaign.fixedAdultPriceMXN,
+
       fixedChildPriceMXN:
         dto.fixedChildPriceMXN !== undefined
           ? dto.fixedChildPriceMXN
           : campaign.fixedChildPriceMXN,
+
       fixedInfantPriceMXN:
         dto.fixedInfantPriceMXN !== undefined
           ? dto.fixedInfantPriceMXN
           : campaign.fixedInfantPriceMXN,
+
+      fixedInapamPriceMXN:
+        dto.fixedInapamPriceMXN !== undefined
+          ? dto.fixedInapamPriceMXN
+          : campaign.fixedInapamPriceMXN,
+
       discountPercent:
         dto.discountPercent !== undefined
           ? dto.discountPercent
           : campaign.discountPercent,
+
       payQty: dto.payQty !== undefined ? dto.payQty : campaign.payQty,
       takeQty: dto.takeQty !== undefined ? dto.takeQty : campaign.takeQty,
     });
@@ -1224,18 +1286,27 @@ export class CampaignsService {
           ...(dto.priority !== undefined ? { priority: dto.priority } : {}),
           ...(dto.autoApply !== undefined ? { autoApply: dto.autoApply } : {}),
           ...(dto.stackable !== undefined ? { stackable: dto.stackable } : {}),
+
           ...(dto.fixedAdultPriceMXN !== undefined
             ? { fixedAdultPriceMXN: dto.fixedAdultPriceMXN }
             : {}),
+
           ...(dto.fixedChildPriceMXN !== undefined
             ? { fixedChildPriceMXN: dto.fixedChildPriceMXN }
             : {}),
+
           ...(dto.fixedInfantPriceMXN !== undefined
             ? { fixedInfantPriceMXN: dto.fixedInfantPriceMXN }
             : {}),
+
+          ...(dto.fixedInapamPriceMXN !== undefined
+            ? { fixedInapamPriceMXN: dto.fixedInapamPriceMXN }
+            : {}),
+
           ...(dto.discountPercent !== undefined
             ? { discountPercent: dto.discountPercent }
             : {}),
+
           ...(dto.payQty !== undefined ? { payQty: dto.payQty } : {}),
           ...(dto.takeQty !== undefined ? { takeQty: dto.takeQty } : {}),
           ...(dto.minAdults !== undefined ? { minAdults: dto.minAdults } : {}),
@@ -1244,6 +1315,7 @@ export class CampaignsService {
             : {}),
           ...(dto.minInfants !== undefined ? { minInfants: dto.minInfants } : {}),
           ...(dto.maxUses !== undefined ? { maxUses: dto.maxUses } : {}),
+
           status,
         },
       });

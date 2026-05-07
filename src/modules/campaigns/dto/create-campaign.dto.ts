@@ -65,12 +65,12 @@ export class CreateCampaignDto {
   @IsUUID()
   packageId?: string;
 
-  @ApiPropertyOptional({ enum: CampaignCategoryDto, example: 'MIXED' })
+  @ApiPropertyOptional({ enum: CampaignCategoryDto, example: 'PRICE' })
   @IsOptional()
   @IsEnum(CampaignCategoryDto)
   category?: CampaignCategoryDto;
 
-  @ApiPropertyOptional({ enum: CampaignRuleTypeDto, example: 'PERCENT_DISCOUNT' })
+  @ApiPropertyOptional({ enum: CampaignRuleTypeDto, example: 'FIXED_PRICE' })
   @IsOptional()
   @IsEnum(CampaignRuleTypeDto)
   ruleType?: CampaignRuleTypeDto;
@@ -80,48 +80,73 @@ export class CreateCampaignDto {
   @IsEnum(CampaignAudienceDto)
   audience?: CampaignAudienceDto;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    example: '2026-04-01T00:00:00.000Z',
+    nullable: true,
+  })
   @IsOptional()
   @IsDateString()
   startAt?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    example: '2026-04-30T23:59:59.000Z',
+    nullable: true,
+  })
   @IsOptional()
   @IsDateString()
   endAt?: string;
 
-  @ApiPropertyOptional({ example: 10 })
+  @ApiPropertyOptional({ example: 90 })
   @IsOptional()
   @IsInt()
   priority?: number;
 
-  @ApiPropertyOptional({ example: true })
+  @ApiPropertyOptional({ example: false })
   @IsOptional()
   @IsBoolean()
   autoApply?: boolean;
 
-  @ApiPropertyOptional({ example: false })
+  @ApiPropertyOptional({ example: true })
   @IsOptional()
   @IsBoolean()
   stackable?: boolean;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    example: 11900,
+    description: 'Precio fijo adulto en centavos. Ejemplo: 11900 = $119.00',
+  })
   @IsOptional()
   @IsInt()
   @Min(0)
   fixedAdultPriceMXN?: number;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    example: 6900,
+    description: 'Precio fijo niño en centavos. Ejemplo: 6900 = $69.00',
+  })
   @IsOptional()
   @IsInt()
   @Min(0)
   fixedChildPriceMXN?: number;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    example: 0,
+    description: 'Precio fijo infante en centavos. Ejemplo: 0 = $0.00',
+  })
   @IsOptional()
   @IsInt()
   @Min(0)
   fixedInfantPriceMXN?: number;
+
+  @ApiPropertyOptional({
+    example: 9900,
+    description: 'Precio fijo INAPAM en centavos. Ejemplo: 9900 = $99.00',
+    nullable: true,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  fixedInapamPriceMXN?: number | null;
 
   @ApiPropertyOptional({ example: 50 })
   @IsOptional()
