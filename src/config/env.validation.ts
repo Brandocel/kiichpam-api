@@ -1,5 +1,11 @@
 import { plainToInstance } from 'class-transformer';
-import { IsNotEmpty, IsOptional, IsString, MinLength, validateSync } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MinLength,
+  validateSync,
+} from 'class-validator';
 
 class EnvVars {
   @IsString()
@@ -32,7 +38,15 @@ class EnvVars {
 
   /**
    * Seguridad para integraciones externas.
-   * Estas credenciales reemplazan el modelo antiguo de consumer_key y consumer_secret en URL.
+   * Estas credenciales se pueden enviar de dos formas:
+   *
+   * 1. Headers:
+   *    x-api-key: API_CLIENT_KEY
+   *    x-api-secret: API_CLIENT_SECRET
+   *
+   * 2. Basic Auth:
+   *    Username: API_CLIENT_KEY
+   *    Password: API_CLIENT_SECRET
    */
   @IsString()
   @IsNotEmpty()
@@ -95,7 +109,7 @@ export function validateEnv(config: Record<string, unknown>) {
   if (errors.length > 0) {
     throw new Error(
       `ENV validation error:\n${errors
-        .map((e) => JSON.stringify(e.constraints))
+        .map((error) => JSON.stringify(error.constraints))
         .join('\n')}`,
     );
   }

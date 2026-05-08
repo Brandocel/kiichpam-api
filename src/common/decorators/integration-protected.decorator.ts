@@ -1,7 +1,7 @@
 import { applyDecorators, UseGuards } from '@nestjs/common';
 import {
   ApiBasicAuth,
-  ApiSecurity,
+  ApiHeader,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 
@@ -12,12 +12,24 @@ export function IntegrationProtected() {
     UseGuards(IntegrationApiKeyGuard),
 
     ApiBasicAuth('integration-basic'),
-    ApiSecurity('x-api-key'),
-    ApiSecurity('x-api-secret'),
+
+    ApiHeader({
+      name: 'x-api-key',
+      required: false,
+      description:
+        'Client key para integración. Alternativa a Basic Auth.',
+    }),
+
+    ApiHeader({
+      name: 'x-api-secret',
+      required: false,
+      description:
+        'Client secret para integración. Alternativa a Basic Auth.',
+    }),
 
     ApiUnauthorizedResponse({
       description:
-        'No autorizado. Debes enviar credenciales válidas de integración.',
+        'No autorizado. Debes enviar Basic Auth válido o headers x-api-key y x-api-secret válidos.',
     }),
   );
 }

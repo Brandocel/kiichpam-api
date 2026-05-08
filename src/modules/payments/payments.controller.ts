@@ -55,10 +55,12 @@ export class PaymentsController {
   }
 
   /**
-   * Público controlado.
-   * Consulta por folio. Si quieres hacerlo privado, también le ponemos @IntegrationProtected().
+   * Protegido.
+   * Consulta el estado de pago por folio.
+   * Acepta Basic Auth o headers x-api-key / x-api-secret.
    */
   @common.Get('status/:folio')
+  @IntegrationProtected()
   @ApiOperation({ summary: 'Consultar estado de pago de una reservación' })
   @ApiParam({
     name: 'folio',
