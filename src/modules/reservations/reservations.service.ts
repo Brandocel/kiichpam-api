@@ -536,6 +536,118 @@ export class ReservationsService {
     return reservation;
   }
 
+  async deleteByFolio(folio: string) {
+    const normalizedFolio = folio?.trim();
+
+    if (!normalizedFolio) {
+      throw new BadRequestException('Reservation folio is required');
+    }
+
+    const reservation = await this.prisma.reservation.findUnique({
+      where: {
+        folio: normalizedFolio,
+      },
+      select: {
+        id: true,
+        folio: true,
+        status: true,
+        couponCode: true,
+        appliedCampaignCodes: true,
+      },
+    });
+
+    if (!reservation) {
+      throw new NotFoundException('Reservation not found');
+    }
+
+    const campaignCodes = this.normalizeAppliedCampaignCodes(
+      reservation.appliedCampaignCodes,
+    );
+
+    const deletedResult = await this.prisma.$transaction(async (tx) => {
+      const deletedExtras = await tx.reservationExtra.deleteMany({
+        where: {
+          reservationId: reservation.id,
+        },
+      });
+
+      const deletedPayments = await tx.payment.deleteMany({
+        where: {
+          reservationId: reservation.id,
+        },
+      });
+
+      const deletedTraces = await tx.reservationTrace.deleteMany({
+        where: {
+          reservationId: reservation.id,
+        },
+      });
+
+      const deletedReservation = await tx.reservation.delete({
+        where: {
+          id: reservation.id,
+        },
+      });
+
+      if (reservation.couponCode) {
+        await tx.coupon.updateMany({
+          where: {
+            code: reservation.couponCode,
+            uses: {
+              gt: 0,
+            },
+          },
+          data: {
+            uses: {
+              decrement: 1,
+            },
+          },
+        });
+      }
+
+      for (const code of campaignCodes) {
+        await tx.campaign.updateMany({
+          where: {
+            code,
+            usedCount: {
+              gt: 0,
+            },
+          },
+          data: {
+            usedCount: {
+              decrement: 1,
+            },
+          },
+        });
+      }
+
+      return {
+        reservation: deletedReservation,
+        deletedRelations: {
+          extras: deletedExtras.count,
+          payments: deletedPayments.count,
+          traces: deletedTraces.count,
+        },
+        restoredCounters: {
+          couponCode: reservation.couponCode ?? null,
+          campaignCodes,
+        },
+      };
+    });
+
+    return {
+      success: true,
+      message: 'Reservación eliminada correctamente',
+      deleted: {
+        id: deletedResult.reservation.id,
+        folio: deletedResult.reservation.folio,
+        status: deletedResult.reservation.status,
+      },
+      deletedRelations: deletedResult.deletedRelations,
+      restoredCounters: deletedResult.restoredCounters,
+    };
+  }
+
   async updateContact(folio: string, body: UpdateReservationContactDto) {
     const exists = await this.prisma.reservation.findUnique({
       where: { folio },
@@ -557,6 +669,37 @@ export class ReservationsService {
         comments: body.comments ?? null,
       },
     });
+  }
+
+  private normalizeAppliedCampaignCodes(appliedCampaignCodes: unknown): string[] {
+    if (!appliedCampaignCodes) {
+      return [];
+    }
+  
+    const normalizeString = (value: string): string[] => {
+      return value
+        .split(',')
+        .map((code) => code.trim().toUpperCase())
+        .filter(Boolean);
+    };
+  
+    let codes: string[] = [];
+  
+    if (typeof appliedCampaignCodes === 'string') {
+      codes = normalizeString(appliedCampaignCodes);
+    }
+  
+    if (Array.isArray(appliedCampaignCodes)) {
+      codes = appliedCampaignCodes.flatMap((item) => {
+        if (typeof item === 'string') {
+          return normalizeString(item);
+        }
+  
+        return [];
+      });
+    }
+  
+    return Array.from(new Set(codes));
   }
 
   private async generateFolio(tx: any) {

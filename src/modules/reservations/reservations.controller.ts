@@ -1,7 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   Patch,
   Post,
@@ -153,6 +156,23 @@ export class ReservationsController {
   })
   findOne(@Param('folio') folio: string) {
     return this.service.findByFolio(folio);
+  }
+
+  /**
+   * PROTEGIDO
+   * Elimina una reservación por folio.
+   * Borra también extras, pagos y trazas relacionadas para evitar errores de relaciones.
+   */
+  @Delete(':folio')
+  @IntegrationProtected()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Eliminar una reservación por folio' })
+  @ApiParam({
+    name: 'folio',
+    example: 'RSV-260424-LXY56S',
+  })
+  remove(@Param('folio') folio: string) {
+    return this.service.deleteByFolio(folio);
   }
 
   /**
