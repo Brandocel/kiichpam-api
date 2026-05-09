@@ -110,7 +110,7 @@ export class ReservationsService {
               {
                 folio,
                 step: 'FOLIO_GENERATED',
-                message: 'Folio generated using database sequence',
+                message: 'Folio consecutivo generado correctamente',
                 metadata: {
                   folio,
                   source: 'reservation_folio_sequences',
@@ -675,49 +675,43 @@ export class ReservationsService {
     if (!appliedCampaignCodes) {
       return [];
     }
-  
+
     const normalizeString = (value: string): string[] => {
       return value
         .split(',')
         .map((code) => code.trim().toUpperCase())
         .filter(Boolean);
     };
-  
+
     let codes: string[] = [];
-  
+
     if (typeof appliedCampaignCodes === 'string') {
       codes = normalizeString(appliedCampaignCodes);
     }
-  
+
     if (Array.isArray(appliedCampaignCodes)) {
       codes = appliedCampaignCodes.flatMap((item) => {
         if (typeof item === 'string') {
           return normalizeString(item);
         }
-  
+
         return [];
       });
     }
-  
+
     return Array.from(new Set(codes));
   }
 
-  private async generateFolio(tx: any) {
-    const now = new Date();
-
-    const year = now.getFullYear().toString().slice(-2);
-    const month = `${now.getMonth() + 1}`.padStart(2, '0');
-    const day = `${now.getDate()}`.padStart(2, '0');
-
-    const dateKey = `${year}${month}${day}`;
+  private async generateFolio(tx: any): Promise<string> {
+    const sequenceKey = 'RESERVATION_GLOBAL';
 
     const sequence = await tx.reservationFolioSequence.upsert({
       where: {
-        dateKey,
+        dateKey: sequenceKey,
       },
       create: {
-        dateKey,
-        lastValue: 1,
+        dateKey: sequenceKey,
+        lastValue: 10000,
       },
       update: {
         lastValue: {
@@ -726,8 +720,12 @@ export class ReservationsService {
       },
     });
 
-    const consecutive = String(sequence.lastValue).padStart(5, '0');
+    if (sequence.lastValue > 99999) {
+      throw new BadRequestException(
+        'Se alcanzó el límite de folios consecutivos de 5 números.',
+      );
+    }
 
-    return `RSV-${dateKey}-${consecutive}`;
+    return String(sequence.lastValue);
   }
 }
