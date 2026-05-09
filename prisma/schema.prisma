@@ -73,6 +73,7 @@ model User {
 
 model Package {
   id               String                   @id @default(uuid())
+  webCode Int    @unique @default(dbgenerated("nextval('package_web_code_seq'::regclass)")) @map("codigoweb")
   code             String                   @unique
   isActive         Boolean                  @default(true)
   promotionOptions PromotionPackageOption[]

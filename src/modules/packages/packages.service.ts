@@ -18,6 +18,14 @@ export class PackagesService {
   private mapPackage(p: any) {
     return {
       id: p.id,
+
+      /**
+       * Código corto para integraciones externas.
+       * Ejemplo: 10000, 10001, 10002.
+       */
+      webCode: p.webCode,
+      codigoWeb: p.webCode,
+
       code: p.code,
       isActive: p.isActive,
 
@@ -73,9 +81,63 @@ export class PackagesService {
     };
   }
 
+  private parseWebCode(value: string | number) {
+    const parsed =
+      typeof value === 'number' ? value : Number(String(value).trim());
+
+    if (!Number.isInteger(parsed)) {
+      throw new BadRequestException('Código web inválido');
+    }
+
+    if (parsed < 10000 || parsed > 99999) {
+      throw new BadRequestException(
+        'El código web debe ser un número de 5 dígitos',
+      );
+    }
+
+    return parsed;
+  }
+
   private async getBasePackageByCode(code: string, lang = 'es') {
     const p = await this.prisma.package.findUnique({
       where: { code },
+      include: {
+        coverMedia: {
+          select: { id: true, url: true, mimeType: true },
+        },
+        translations: {
+          where: { lang },
+          select: {
+            lang: true,
+            name: true,
+            description: true,
+            includes: true,
+            excludes: true,
+            notes: true,
+          },
+        },
+        extras: {
+          where: { isActive: true },
+          include: {
+            translations: {
+              where: { lang },
+              select: { lang: true, name: true, description: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!p || !p.isActive) {
+      throw new NotFoundException('Package not found');
+    }
+
+    return p;
+  }
+
+  private async getBasePackageByWebCode(webCode: number, lang = 'es') {
+    const p = await this.prisma.package.findUnique({
+      where: { webCode },
       include: {
         coverMedia: {
           select: { id: true, url: true, mimeType: true },
@@ -232,6 +294,13 @@ export class PackagesService {
     return this.mapPackage(p);
   }
 
+  async findByWebCode(webCodeRaw: string | number, lang = 'es') {
+    const webCode = this.parseWebCode(webCodeRaw);
+    const p = await this.getBasePackageByWebCode(webCode, lang);
+
+    return this.mapPackage(p);
+  }
+
   async findByCodeResolved(
     code: string,
     options?: {
@@ -257,7 +326,54 @@ export class PackagesService {
     }
 
     const quote = await this.campaignsService.quote({
-      packageCode: code,
+      packageCode: mappedBase.code,
+      adults,
+      children,
+      infants,
+      lang,
+      quoteAt,
+    } as any);
+
+    return {
+      success: true,
+      data: {
+        ...mappedBase,
+        campaignApplied: (quote?.data?.appliedCampaigns?.length ?? 0) > 0,
+        appliedCampaigns: quote?.data?.appliedCampaigns ?? [],
+        effectivePackage: quote?.data?.effectivePackage ?? null,
+        pricing: quote?.data?.pricing ?? null,
+      },
+    };
+  }
+
+  async findByWebCodeResolved(
+    webCodeRaw: string | number,
+    options?: {
+      lang?: string;
+      adults?: number;
+      children?: number;
+      infants?: number;
+      quoteAt?: string;
+      withCampaign?: boolean;
+    },
+  ) {
+    const webCode = this.parseWebCode(webCodeRaw);
+
+    const { lang, adults, children, infants, quoteAt, withCampaign } =
+      this.parseResolvedOptions(options);
+
+    const basePackage = await this.getBasePackageByWebCode(webCode, lang);
+    const mappedBase = this.mapPackage(basePackage);
+
+    if (!withCampaign) {
+      return {
+        success: true,
+        data: mappedBase,
+      };
+    }
+
+    const quote = await this.campaignsService.quote({
+      packageCode: mappedBase.code,
       adults,
       children,
       infants,

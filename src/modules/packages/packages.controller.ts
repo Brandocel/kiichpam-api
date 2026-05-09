@@ -9,7 +9,7 @@ import {
   Put,
   Query,
 } from '@nestjs/common';
-import { ApiBody, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiBody, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 
 import { PackagesService } from './packages.service';
 import { CreatePackageDto } from './dto/create-package.dto';
@@ -60,7 +60,89 @@ export class PackagesController {
 
   /**
    * Público.
-   * Lo usa la web para mostrar detalle de un paquete.
+   * Consultar paquete por código web corto.
+   * Ejemplo: GET /packages/web-code/10000
+   *
+   * Importante:
+   * Esta ruta debe ir antes de @Get(':code')
+   * para que Nest no confunda "web-code" con un code normal.
+   */
+  @Get('web-code/:webCode')
+  @ApiParam({ name: 'webCode', required: true, example: 10000 })
+  @ApiQuery({ name: 'lang', required: false, example: 'es' })
+  @ApiQuery({ name: 'adults', required: false, example: 2 })
+  @ApiQuery({ name: 'children', required: false, example: 0 })
+  @ApiQuery({ name: 'infants', required: false, example: 0 })
+  @ApiQuery({
+    name: 'quoteAt',
+    required: false,
+    example: '2026-04-07T12:00:00.000Z',
+  })
+  @ApiQuery({ name: 'withCampaign', required: false, example: true })
+  findOneByWebCode(
+    @Param('webCode') webCode: string,
+    @Query('lang') lang?: string,
+    @Query('adults') adults?: string,
+    @Query('children') children?: string,
+    @Query('infants') infants?: string,
+    @Query('quoteAt') quoteAt?: string,
+    @Query('withCampaign') withCampaign?: string,
+  ) {
+    return this.service.findByWebCodeResolved(webCode, {
+      lang: lang ?? 'es',
+      adults: Number(adults ?? 0),
+      children: Number(children ?? 0),
+      infants: Number(infants ?? 0),
+      quoteAt,
+      withCampaign:
+        withCampaign === 'true' ||
+        withCampaign === '1' ||
+        withCampaign === 'yes',
+    });
+  }
+
+  /**
+   * Público.
+   * Alias en español para consultar por código web.
+   * Ejemplo: GET /packages/codigo-web/10000
+   */
+  @Get('codigo-web/:codigoWeb')
+  @ApiParam({ name: 'codigoWeb', required: true, example: 10000 })
+  @ApiQuery({ name: 'lang', required: false, example: 'es' })
+  @ApiQuery({ name: 'adults', required: false, example: 2 })
+  @ApiQuery({ name: 'children', required: false, example: 0 })
+  @ApiQuery({ name: 'infants', required: false, example: 0 })
+  @ApiQuery({
+    name: 'quoteAt',
+    required: false,
+    example: '2026-04-07T12:00:00.000Z',
+  })
+  @ApiQuery({ name: 'withCampaign', required: false, example: true })
+  findOneByCodigoWeb(
+    @Param('codigoWeb') codigoWeb: string,
+    @Query('lang') lang?: string,
+    @Query('adults') adults?: string,
+    @Query('children') children?: string,
+    @Query('infants') infants?: string,
+    @Query('quoteAt') quoteAt?: string,
+    @Query('withCampaign') withCampaign?: string,
+  ) {
+    return this.service.findByWebCodeResolved(codigoWeb, {
+      lang: lang ?? 'es',
+      adults: Number(adults ?? 0),
+      children: Number(children ?? 0),
+      infants: Number(infants ?? 0),
+      quoteAt,
+      withCampaign:
+        withCampaign === 'true' ||
+        withCampaign === '1' ||
+        withCampaign === 'yes',
+    });
+  }
+
+  /**
+   * Público.
+   * Lo usa la web para mostrar detalle de un paquete por code.
    */
   @Get(':code')
   @ApiQuery({ name: 'lang', required: false, example: 'es' })
