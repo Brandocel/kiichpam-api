@@ -11,8 +11,40 @@ import { UpdateReservationContactDto } from './dto/update-reservation-contact.dt
 import { ReservationMailService } from './reservation-mail.service';
 import { QueryReservationsDto } from './dto/query-reservations.dto';
 
+type MoneyLike =
+  | number
+  | string
+  | null
+  | undefined
+  | {
+      toNumber?: () => number;
+    };
+
+type MoneyRecord = Record<string, any>;
+
 @Injectable()
 export class ReservationsService {
+  private static readonly PAYMENT_MONEY_FIELDS = [
+    'amount',
+    'amountMXN',
+    'total',
+    'totalMXN',
+    'subtotal',
+    'subtotalMXN',
+    'fee',
+    'feeMXN',
+    'tax',
+    'taxMXN',
+    'discount',
+    'discountMXN',
+    'refundedAmount',
+    'refundedAmountMXN',
+    'refundAmount',
+    'refundAmountMXN',
+    'stripeAmount',
+    'stripeAmountMXN',
+  ];
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly pricingService: ReservationPricingService,
@@ -379,17 +411,7 @@ export class ReservationsService {
             }
           : null,
 
-        pricing: {
-          peopleSubtotalMXN: reservation.peopleSubtotalMXN,
-          subtotalMXN: reservation.subtotalMXN,
-          extrasMXN: reservation.extrasMXN,
-          discountMXN: reservation.discountMXN,
-          campaignDiscountMXN: reservation.campaignDiscountMXN,
-          couponDiscountMXN: reservation.couponDiscountMXN,
-          inapamDiscountMXN: reservation.inapamDiscountMXN,
-          totalMXN: reservation.totalMXN,
-          currency: reservation.currency,
-        },
+        pricing: this.mapReservationPricingToPesos(reservation),
 
         campaign: {
           campaignCode: reservation.campaignCode,
@@ -398,11 +420,15 @@ export class ReservationsService {
 
         coupon: {
           couponCode: reservation.couponCode,
-          couponDiscountMXN: reservation.couponDiscountMXN,
+          couponDiscountMXN: this.centsToPesosOrZero(
+            reservation.couponDiscountMXN,
+          ),
         },
 
-        extras: reservation.extras,
-        payments: reservation.payments,
+        extras: reservation.extras.map((extra) => this.mapExtraToPesos(extra)),
+        payments: reservation.payments.map((payment) =>
+          this.mapPaymentToPesos(payment),
+        ),
 
         createdAt: reservation.createdAt,
         updatedAt: reservation.updatedAt,
@@ -669,6 +695,99 @@ export class ReservationsService {
         comments: body.comments ?? null,
       },
     });
+  }
+
+  private mapReservationPricingToPesos(reservation: MoneyRecord) {
+    return {
+      peopleSubtotalMXN: this.centsToPesosOrZero(
+        reservation.peopleSubtotalMXN,
+      ),
+      subtotalMXN: this.centsToPesosOrZero(reservation.subtotalMXN),
+      extrasMXN: this.centsToPesosOrZero(reservation.extrasMXN),
+      discountMXN: this.centsToPesosOrZero(reservation.discountMXN),
+      campaignDiscountMXN: this.centsToPesosOrZero(
+        reservation.campaignDiscountMXN,
+      ),
+      couponDiscountMXN: this.centsToPesosOrZero(
+        reservation.couponDiscountMXN,
+      ),
+      inapamDiscountMXN: this.centsToPesosOrZero(
+        reservation.inapamDiscountMXN,
+      ),
+      totalMXN: this.centsToPesosOrZero(reservation.totalMXN),
+      currency: reservation.currency,
+    };
+  }
+
+  private mapExtraToPesos<T extends MoneyRecord>(extra: T): T {
+    const normalized: MoneyRecord = { ...extra };
+
+    if (Object.prototype.hasOwnProperty.call(normalized, 'priceMXN')) {
+      normalized.priceMXN = this.centsToPesosOrZero(normalized.priceMXN);
+    }
+
+    return normalized as T;
+  }
+
+  private mapPaymentToPesos<T extends MoneyRecord>(payment: T): T {
+    return this.mapMoneyFieldsToPesos(
+      payment,
+      ReservationsService.PAYMENT_MONEY_FIELDS,
+    );
+  }
+
+  private mapMoneyFieldsToPesos<T extends MoneyRecord>(
+    item: T,
+    fields: string[],
+  ): T {
+    const normalized: MoneyRecord = { ...item };
+
+    for (const field of fields) {
+      if (Object.prototype.hasOwnProperty.call(normalized, field)) {
+        normalized[field] = this.centsToPesosOrZero(normalized[field]);
+      }
+    }
+
+    return normalized as T;
+  }
+
+  private centsToPesosOrZero(value: MoneyLike): number {
+    return this.centsToPesos(value) ?? 0;
+  }
+
+  private centsToPesos(value: MoneyLike): number | null {
+    const amount = this.toSafeNumber(value);
+
+    if (amount === null) {
+      return null;
+    }
+
+    return amount / 100;
+  }
+
+  private toSafeNumber(value: MoneyLike): number | null {
+    if (value === null || value === undefined) {
+      return null;
+    }
+
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value : null;
+    }
+
+    if (typeof value === 'string') {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    if (
+      typeof value === 'object' &&
+      typeof value.toNumber === 'function'
+    ) {
+      const parsed = value.toNumber();
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    return null;
   }
 
   private normalizeAppliedCampaignCodes(appliedCampaignCodes: unknown): string[] {
