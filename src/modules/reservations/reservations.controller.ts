@@ -63,7 +63,8 @@ export class ReservationsController {
     name: 'search',
     required: false,
     example: 'RSV-260424',
-    description: 'Busca por folio, nombre, apellido, email o teléfono',
+    description:
+      'Busca por folio, nombre, apellido, email, teléfono, referencia o campaña',
   })
   @ApiQuery({
     name: 'status',
@@ -79,6 +80,13 @@ export class ReservationsController {
     name: 'email',
     required: false,
     example: 'cliente@gmail.com',
+  })
+  @ApiQuery({
+    name: 'reference',
+    required: false,
+    example: 'Facebook',
+    description:
+      'Filtra por referencia/origen: Facebook, Instagram, TikTok, WhatsApp, Directo, Agencias, Taxis, Hotel o Pagina WEB',
   })
   @ApiQuery({
     name: 'from',

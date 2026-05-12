@@ -33,6 +33,10 @@ export class QueryReservationsDto {
 
   @IsOptional()
   @IsString()
+  reference?: string;
+
+  @IsOptional()
+  @IsString()
   from?: string;
 
   @IsOptional()

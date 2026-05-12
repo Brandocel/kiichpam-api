@@ -54,6 +54,7 @@ export class ReservationsService {
 
   async quote(dto: QuoteDto) {
     const calculation = await this.pricingService.calculate(dto);
+    const reference = this.resolveReservationReference(dto);
 
     return {
       package: calculation.packageSummary,
@@ -69,11 +70,14 @@ export class ReservationsService {
       rules: calculation.rules,
       breakdown: calculation.breakdown,
       snapshot: calculation.snapshot,
+      attribution: this.buildDtoAttribution(dto, reference),
     };
   }
 
   async create(dto: QuoteDto) {
     const calculation = await this.pricingService.calculate(dto);
+    const reference = this.resolveReservationReference(dto);
+    const attribution = this.buildDtoAttribution(dto, reference);
 
     const reservation = await this.prisma.$transaction(async (tx) => {
       const folio = await this.generateFolio(tx);
@@ -89,7 +93,9 @@ export class ReservationsService {
           infants: dto.infants,
 
           campaignCode: calculation.primaryCampaignCode,
-          appliedCampaignCodes: calculation.appliedCampaignCodes.join(','),
+          appliedCampaignCodes: calculation.appliedCampaignCodes,
+
+          reference,
           utmSource: dto.utmSource ?? null,
           utmMedium: dto.utmMedium ?? null,
           utmCampaign: dto.utmCampaign ?? null,
@@ -97,6 +103,7 @@ export class ReservationsService {
           utmTerm: dto.utmTerm ?? null,
           fbclid: dto.fbclid ?? null,
           ttclid: dto.ttclid ?? null,
+          gclid: dto.gclid ?? null,
 
           couponCode: calculation.couponSummary?.code ?? null,
           couponDiscountMXN: calculation.pricing.couponDiscountMXN,
@@ -156,6 +163,7 @@ export class ReservationsService {
                   pricing: calculation.pricing,
                   campaigns: calculation.appliedCampaignCodes,
                   coupon: calculation.couponSummary,
+                  attribution,
                 },
               },
             ],
@@ -197,7 +205,7 @@ export class ReservationsService {
       return created;
     });
 
-    return reservation;
+    return this.mapReservationWithAttribution(reservation);
   }
 
   async findAll(query: QueryReservationsDto) {
@@ -210,6 +218,7 @@ export class ReservationsService {
     const status = query.status?.trim().toUpperCase();
     const packageCode = query.packageCode?.trim().toUpperCase();
     const email = query.email?.trim().toLowerCase();
+    const reference = query.reference?.trim();
 
     const allowedSortBy = ['createdAt', 'visitDate', 'totalMXN'];
     const sortBy = allowedSortBy.includes(query.sortBy ?? '')
@@ -248,6 +257,15 @@ export class ReservationsService {
         ? {
             email: {
               contains: email,
+              mode: 'insensitive',
+            },
+          }
+        : {}),
+
+      ...(reference
+        ? {
+            reference: {
+              contains: reference,
               mode: 'insensitive',
             },
           }
@@ -309,6 +327,60 @@ export class ReservationsService {
                   mode: 'insensitive',
                 },
               },
+              {
+                reference: {
+                  contains: search,
+                  mode: 'insensitive',
+                },
+              },
+              {
+                utmSource: {
+                  contains: search,
+                  mode: 'insensitive',
+                },
+              },
+              {
+                utmMedium: {
+                  contains: search,
+                  mode: 'insensitive',
+                },
+              },
+              {
+                utmCampaign: {
+                  contains: search,
+                  mode: 'insensitive',
+                },
+              },
+              {
+                utmContent: {
+                  contains: search,
+                  mode: 'insensitive',
+                },
+              },
+              {
+                utmTerm: {
+                  contains: search,
+                  mode: 'insensitive',
+                },
+              },
+              {
+                fbclid: {
+                  contains: search,
+                  mode: 'insensitive',
+                },
+              },
+              {
+                ttclid: {
+                  contains: search,
+                  mode: 'insensitive',
+                },
+              },
+              {
+                gclid: {
+                  contains: search,
+                  mode: 'insensitive',
+                },
+              },
             ],
           }
         : {}),
@@ -364,6 +436,7 @@ export class ReservationsService {
         status: status ?? null,
         packageCode: packageCode ?? null,
         email: email ?? null,
+        reference: reference ?? null,
         from: query.from ?? null,
         to: query.to ?? null,
         sortBy,
@@ -381,58 +454,78 @@ export class ReservationsService {
         total,
         byStatus,
       },
-      data: reservations.map((reservation) => ({
-        id: reservation.id,
-        folio: reservation.folio,
-        status: reservation.status,
-        visitDate: reservation.visitDate,
+      data: reservations.map((reservation) => {
+        const resolvedReference =
+          this.resolveStoredReservationReference(reservation);
 
-        passengers: {
-          adults: reservation.adults,
-          children: reservation.children,
-          infants: reservation.infants,
-        },
+        return {
+          id: reservation.id,
+          folio: reservation.folio,
+          status: reservation.status,
+          visitDate: reservation.visitDate,
 
-        customer: {
-          firstName: reservation.firstName,
-          lastName: reservation.lastName,
-          email: reservation.email,
-          phone: reservation.phone,
-          country: reservation.country,
-          comments: reservation.comments,
-        },
+          reference: resolvedReference,
+          attribution: {
+            reference: resolvedReference,
+            utmSource: reservation.utmSource,
+            utmMedium: reservation.utmMedium,
+            utmCampaign: reservation.utmCampaign,
+            utmContent: reservation.utmContent,
+            utmTerm: reservation.utmTerm,
+            fbclid: reservation.fbclid,
+            ttclid: reservation.ttclid,
+            gclid: reservation.gclid,
+          },
 
-        package: reservation.package
-          ? {
-              id: reservation.package.id,
-              code: reservation.package.code,
-              currency: reservation.package.currency,
-              coverMedia: reservation.package.coverMedia,
-            }
-          : null,
+          passengers: {
+            adults: reservation.adults,
+            children: reservation.children,
+            infants: reservation.infants,
+          },
 
-        pricing: this.mapReservationPricingToPesos(reservation),
+          customer: {
+            firstName: reservation.firstName,
+            lastName: reservation.lastName,
+            email: reservation.email,
+            phone: reservation.phone,
+            country: reservation.country,
+            comments: reservation.comments,
+          },
 
-        campaign: {
-          campaignCode: reservation.campaignCode,
-          appliedCampaignCodes: reservation.appliedCampaignCodes,
-        },
+          package: reservation.package
+            ? {
+                id: reservation.package.id,
+                code: reservation.package.code,
+                currency: reservation.package.currency,
+                coverMedia: reservation.package.coverMedia,
+              }
+            : null,
 
-        coupon: {
-          couponCode: reservation.couponCode,
-          couponDiscountMXN: this.centsToPesosOrZero(
-            reservation.couponDiscountMXN,
+          pricing: this.mapReservationPricingToPesos(reservation),
+
+          campaign: {
+            campaignCode: reservation.campaignCode,
+            appliedCampaignCodes: reservation.appliedCampaignCodes,
+          },
+
+          coupon: {
+            couponCode: reservation.couponCode,
+            couponDiscountMXN: this.centsToPesosOrZero(
+              reservation.couponDiscountMXN,
+            ),
+          },
+
+          extras: reservation.extras.map((extra) =>
+            this.mapExtraToPesos(extra),
           ),
-        },
+          payments: reservation.payments.map((payment) =>
+            this.mapPaymentToPesos(payment),
+          ),
 
-        extras: reservation.extras.map((extra) => this.mapExtraToPesos(extra)),
-        payments: reservation.payments.map((payment) =>
-          this.mapPaymentToPesos(payment),
-        ),
-
-        createdAt: reservation.createdAt,
-        updatedAt: reservation.updatedAt,
-      })),
+          createdAt: reservation.createdAt,
+          updatedAt: reservation.updatedAt,
+        };
+      }),
     };
   }
 
@@ -496,7 +589,7 @@ export class ReservationsService {
     return {
       success: true,
       message: 'Reserva marcada como pagada y correo procesado',
-      reservation: updatedReservation,
+      reservation: this.mapReservationWithAttribution(updatedReservation),
       email: emailResult,
     };
   }
@@ -532,6 +625,7 @@ export class ReservationsService {
     return {
       success: true,
       message: 'Correo reenviado/procesado correctamente',
+      reservation: this.mapReservationWithAttribution(reservation),
       email: emailResult,
     };
   }
@@ -559,7 +653,7 @@ export class ReservationsService {
       throw new NotFoundException('Reservation not found');
     }
 
-    return reservation;
+    return this.mapReservationWithAttribution(reservation);
   }
 
   async deleteByFolio(folio: string) {
@@ -695,6 +789,152 @@ export class ReservationsService {
         comments: body.comments ?? null,
       },
     });
+  }
+
+  private buildDtoAttribution(dto: QuoteDto, reference: string) {
+    return {
+      reference,
+      utmSource: dto.utmSource ?? null,
+      utmMedium: dto.utmMedium ?? null,
+      utmCampaign: dto.utmCampaign ?? null,
+      utmContent: dto.utmContent ?? null,
+      utmTerm: dto.utmTerm ?? null,
+      fbclid: dto.fbclid ?? null,
+      ttclid: dto.ttclid ?? null,
+      gclid: dto.gclid ?? null,
+    };
+  }
+
+  private mapReservationWithAttribution<T extends MoneyRecord>(reservation: T) {
+    const reference = this.resolveStoredReservationReference(reservation);
+
+    return {
+      ...reservation,
+      reference,
+      attribution: {
+        reference,
+        utmSource: reservation.utmSource ?? null,
+        utmMedium: reservation.utmMedium ?? null,
+        utmCampaign: reservation.utmCampaign ?? null,
+        utmContent: reservation.utmContent ?? null,
+        utmTerm: reservation.utmTerm ?? null,
+        fbclid: reservation.fbclid ?? null,
+        ttclid: reservation.ttclid ?? null,
+        gclid: reservation.gclid ?? null,
+      },
+    };
+  }
+
+  private resolveReservationReference(dto: QuoteDto): string {
+    const explicitReference = this.normalizeReference(dto.reference);
+
+    if (explicitReference) {
+      return explicitReference;
+    }
+
+    const sourceReference = this.normalizeReference(dto.utmSource);
+
+    if (sourceReference) {
+      return sourceReference;
+    }
+
+    if (dto.fbclid) {
+      return 'Facebook';
+    }
+
+    if (dto.ttclid) {
+      return 'TikTok';
+    }
+
+    if (dto.gclid) {
+      return 'Google';
+    }
+
+    return 'Pagina WEB';
+  }
+
+  private resolveStoredReservationReference(reservation: {
+    reference?: string | null;
+    utmSource?: string | null;
+    fbclid?: string | null;
+    ttclid?: string | null;
+    gclid?: string | null;
+  }) {
+    const explicitReference = this.normalizeReference(reservation.reference);
+
+    if (explicitReference) {
+      return explicitReference;
+    }
+
+    const sourceReference = this.normalizeReference(reservation.utmSource);
+
+    if (sourceReference) {
+      return sourceReference;
+    }
+
+    if (reservation.fbclid) {
+      return 'Facebook';
+    }
+
+    if (reservation.ttclid) {
+      return 'TikTok';
+    }
+
+    if (reservation.gclid) {
+      return 'Google';
+    }
+
+    return 'Pagina WEB';
+  }
+
+  private normalizeReference(value?: string | null): string | null {
+    const normalized = value?.trim().toLowerCase();
+
+    if (!normalized) {
+      return null;
+    }
+
+    const referenceMap: Record<string, string> = {
+      facebook: 'Facebook',
+      fb: 'Facebook',
+      meta: 'Facebook',
+
+      instagram: 'Instagram',
+      ig: 'Instagram',
+
+      tiktok: 'TikTok',
+      tik_tok: 'TikTok',
+      tt: 'TikTok',
+
+      whatsapp: 'WhatsApp',
+      whats: 'WhatsApp',
+      wa: 'WhatsApp',
+
+      google: 'Google',
+      g: 'Google',
+
+      directo: 'Directo',
+      direct: 'Directo',
+
+      agencia: 'Agencias',
+      agencias: 'Agencias',
+      agency: 'Agencias',
+      agencies: 'Agencias',
+
+      taxi: 'Taxis',
+      taxis: 'Taxis',
+
+      hotel: 'Hotel',
+      hoteles: 'Hotel',
+
+      web: 'Pagina WEB',
+      website: 'Pagina WEB',
+      paginaweb: 'Pagina WEB',
+      'pagina web': 'Pagina WEB',
+      page: 'Pagina WEB',
+    };
+
+    return referenceMap[normalized] ?? value.trim();
   }
 
   private mapReservationPricingToPesos(reservation: MoneyRecord) {

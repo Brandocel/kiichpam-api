@@ -72,8 +72,9 @@ model User {
 }
 
 model Package {
-  id               String                   @id @default(uuid())
+  id      String @id @default(uuid())
   webCode Int    @unique @default(dbgenerated("nextval('package_web_code_seq'::regclass)")) @map("codigoweb")
+
   code             String                   @unique
   isActive         Boolean                  @default(true)
   promotionOptions PromotionPackageOption[]
@@ -253,13 +254,16 @@ model Reservation {
 
   campaignCode         String?
   appliedCampaignCodes Json?
-  utmSource            String?
-  utmMedium            String?
-  utmCampaign          String?
-  utmContent           String?
-  utmTerm              String?
-  fbclid               String?
-  ttclid               String?
+
+  reference   String?
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+  utmContent  String?
+  utmTerm     String?
+  fbclid      String?
+  ttclid      String?
+  gclid       String?
 
   couponCode        String?
   couponDiscountMXN Int     @default(0)
@@ -299,6 +303,9 @@ model Reservation {
   @@index([packageId])
   @@index([visitDate])
   @@index([createdAt])
+  @@index([reference])
+  @@index([utmSource])
+  @@index([utmCampaign])
 }
 
 model ReservationTrace {

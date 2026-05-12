@@ -65,6 +65,15 @@ export class QuoteDto {
   @IsString()
   campaignCode?: string;
 
+  @ApiPropertyOptional({
+    example: 'Facebook',
+    description:
+      'Referencia/origen de la reservación: Facebook, Instagram, TikTok, WhatsApp, Directo, Agencias, Taxis, Hotel o Pagina WEB',
+  })
+  @IsOptional()
+  @IsString()
+  reference?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
@@ -99,6 +108,11 @@ export class QuoteDto {
   @IsOptional()
   @IsString()
   ttclid?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  gclid?: string;
 
   @ApiPropertyOptional({ example: 'es' })
   @IsOptional()
