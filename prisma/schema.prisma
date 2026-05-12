@@ -419,23 +419,49 @@ model MediaAsset {
 }
 
 model HeroCarouselSlide {
-  id        String   @id @default(uuid())
-  mediaId   String
-  order     Int      @default(0)
-  isActive  Boolean  @default(true)
-  title     String?
-  subtitle  String?
-  linkUrl   String?
-  linkText  String?
-  altText   String?
+  id       String  @id @default(uuid())
+  mediaId  String
+  order    Int     @default(0)
+  isActive Boolean @default(true)
+
+  // Campos actuales.
+  // Déjalos para no romper datos existentes y usarlos como fallback.
+  title    String?
+  subtitle String?
+  linkUrl  String?
+  linkText String?
+  altText  String?
+
+  media        MediaAsset                     @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  translations HeroCarouselSlideTranslation[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
-  media MediaAsset @relation(fields: [mediaId], references: [id], onDelete: Cascade)
 
   @@index([order])
   @@index([isActive])
   @@map("hero_carousel_slides")
+}
+
+model HeroCarouselSlideTranslation {
+  id      String @id @default(uuid())
+  slideId String
+  lang    String
+
+  title    String?
+  subtitle String?
+  linkText String?
+  altText  String?
+
+  slide HeroCarouselSlide @relation(fields: [slideId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([slideId, lang])
+  @@index([slideId])
+  @@index([lang])
+  @@map("hero_carousel_slide_translations")
 }
 
 model ReservationEmailLog {
