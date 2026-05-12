@@ -778,7 +778,7 @@ export class ReservationsService {
       throw new NotFoundException('Reservation not found');
     }
 
-    return this.prisma.reservation.update({
+    const updatedReservation = await this.prisma.reservation.update({
       where: { folio },
       data: {
         firstName: body.firstName ?? null,
@@ -788,7 +788,19 @@ export class ReservationsService {
         country: body.country ?? null,
         comments: body.comments ?? null,
       },
+      include: {
+        extras: true,
+        payments: true,
+        traces: true,
+        package: {
+          include: {
+            coverMedia: true,
+          },
+        },
+      },
     });
+
+    return this.mapReservationWithAttribution(updatedReservation);
   }
 
   private buildDtoAttribution(dto: QuoteDto, reference: string) {
@@ -807,9 +819,11 @@ export class ReservationsService {
 
   private mapReservationWithAttribution<T extends MoneyRecord>(reservation: T) {
     const reference = this.resolveStoredReservationReference(reservation);
+    const normalizedReservation =
+      this.normalizeReservationMoneyForResponse(reservation);
 
     return {
-      ...reservation,
+      ...normalizedReservation,
       reference,
       attribution: {
         reference,
@@ -823,6 +837,60 @@ export class ReservationsService {
         gclid: reservation.gclid ?? null,
       },
     };
+  }
+
+  private normalizeReservationMoneyForResponse<T extends MoneyRecord>(
+    reservation: T,
+  ): T {
+    const normalized: MoneyRecord = { ...reservation };
+
+    const reservationMoneyFields = [
+      'couponDiscountMXN',
+      'inapamDiscountMXN',
+      'campaignDiscountMXN',
+      'discountMXN',
+      'peopleSubtotalMXN',
+      'subtotalMXN',
+      'extrasMXN',
+      'totalMXN',
+    ];
+
+    for (const field of reservationMoneyFields) {
+      if (Object.prototype.hasOwnProperty.call(normalized, field)) {
+        normalized[field] = this.centsToPesosOrZero(normalized[field]);
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(normalized, 'pricingBreakdown')) {
+      normalized.pricingBreakdown = this.mapNestedMoneyToPesos(
+        normalized.pricingBreakdown,
+      );
+    }
+
+    if (normalized.package) {
+      normalized.package = this.mapPackageToPesos(normalized.package);
+    }
+
+    if (Array.isArray(normalized.extras)) {
+      normalized.extras = normalized.extras.map((extra) =>
+        this.mapExtraToPesos(extra),
+      );
+    }
+
+    if (Array.isArray(normalized.payments)) {
+      normalized.payments = normalized.payments.map((payment) =>
+        this.mapPaymentToPesos(payment),
+      );
+    }
+
+    if (Array.isArray(normalized.traces)) {
+      normalized.traces = normalized.traces.map((trace: MoneyRecord) => ({
+        ...trace,
+        metadata: this.mapNestedMoneyToPesos(trace.metadata),
+      }));
+    }
+
+    return normalized as T;
   }
 
   private resolveReservationReference(dto: QuoteDto): string {
@@ -959,6 +1027,15 @@ export class ReservationsService {
     };
   }
 
+  private mapPackageToPesos<T extends MoneyRecord>(pkg: T): T {
+    return this.mapMoneyFieldsToPesos(pkg, [
+      'adultPriceMXN',
+      'childPriceMXN',
+      'infantPriceMXN',
+      'inapamPriceMXN',
+    ]);
+  }
+
   private mapExtraToPesos<T extends MoneyRecord>(extra: T): T {
     const normalized: MoneyRecord = { ...extra };
 
@@ -989,6 +1066,41 @@ export class ReservationsService {
     }
 
     return normalized as T;
+  }
+
+  private mapNestedMoneyToPesos<T>(value: T): T {
+    if (Array.isArray(value)) {
+      return value.map((item) => this.mapNestedMoneyToPesos(item)) as T;
+    }
+
+    if (!this.isPlainObject(value)) {
+      return value;
+    }
+
+    const normalized: MoneyRecord = {};
+
+    for (const [key, itemValue] of Object.entries(value)) {
+      if (this.isMoneyFieldName(key)) {
+        normalized[key] = this.centsToPesosOrZero(itemValue as MoneyLike);
+        continue;
+      }
+
+      normalized[key] = this.mapNestedMoneyToPesos(itemValue);
+    }
+
+    return normalized as T;
+  }
+
+  private isMoneyFieldName(field: string): boolean {
+    return field.endsWith('MXN');
+  }
+
+  private isPlainObject(value: unknown): value is MoneyRecord {
+    return (
+      Boolean(value) &&
+      typeof value === 'object' &&
+      !(value instanceof Date)
+    );
   }
 
   private centsToPesosOrZero(value: MoneyLike): number {
