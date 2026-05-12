@@ -1,8 +1,3 @@
--- AlterTable
-ALTER TABLE "Package" ALTER COLUMN "codigoweb" SET DEFAULT nextval('package_web_code_seq'::regclass),
-ALTER COLUMN "codigoweb" DROP DEFAULT;
-DROP SEQUENCE "package_web_code_seq";
-
 -- CreateTable
 CREATE TABLE "hero_carousel_slide_translations" (
     "id" TEXT NOT NULL,
@@ -19,13 +14,21 @@ CREATE TABLE "hero_carousel_slide_translations" (
 );
 
 -- CreateIndex
-CREATE INDEX "hero_carousel_slide_translations_slideId_idx" ON "hero_carousel_slide_translations"("slideId");
+CREATE INDEX "hero_carousel_slide_translations_slideId_idx" 
+ON "hero_carousel_slide_translations"("slideId");
 
 -- CreateIndex
-CREATE INDEX "hero_carousel_slide_translations_lang_idx" ON "hero_carousel_slide_translations"("lang");
+CREATE INDEX "hero_carousel_slide_translations_lang_idx" 
+ON "hero_carousel_slide_translations"("lang");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "hero_carousel_slide_translations_slideId_lang_key" ON "hero_carousel_slide_translations"("slideId", "lang");
+CREATE UNIQUE INDEX "hero_carousel_slide_translations_slideId_lang_key" 
+ON "hero_carousel_slide_translations"("slideId", "lang");
 
 -- AddForeignKey
-ALTER TABLE "hero_carousel_slide_translations" ADD CONSTRAINT "hero_carousel_slide_translations_slideId_fkey" FOREIGN KEY ("slideId") REFERENCES "hero_carousel_slides"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "hero_carousel_slide_translations" 
+ADD CONSTRAINT "hero_carousel_slide_translations_slideId_fkey" 
+FOREIGN KEY ("slideId") 
+REFERENCES "hero_carousel_slides"("id") 
+ON DELETE CASCADE 
+ON UPDATE CASCADE;
