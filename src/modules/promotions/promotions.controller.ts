@@ -8,10 +8,17 @@ import {
   Patch,
   Post,
   Put,
+  Query,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
-import { ApiBody, ApiConsumes, ApiOperation } from '@nestjs/swagger';
+import {
+  ApiBody,
+  ApiConsumes,
+  ApiOperation,
+  ApiParam,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import { extname } from 'path';
@@ -23,6 +30,7 @@ import {
 import { CreatePromotionDto } from './dto/create-promotion.dto';
 import { UpdatePromotionDto } from './dto/update-promotion.dto';
 import { ReorderPromotionsDto } from './dto/reorder-promotions.dto';
+import { UpsertPromotionLanguageDto } from './dto/upsert-promotion-language.dto';
 
 function sanitizeBaseName(originalName: string) {
   const cleaned = (originalName || 'file')
@@ -96,13 +104,15 @@ export class PromotionsController {
   constructor(private readonly promotionsService: PromotionsService) {}
 
   @Get('public')
-  findPublicPromotions() {
-    return this.promotionsService.findPublicPromotions();
+  @ApiQuery({ name: 'lang', required: false, example: 'es' })
+  findPublicPromotions(@Query('lang') lang?: string) {
+    return this.promotionsService.findPublicPromotions(lang ?? 'es');
   }
 
   @Get()
-  findAll() {
-    return this.promotionsService.findAll();
+  @ApiQuery({ name: 'lang', required: false, example: 'es' })
+  findAll(@Query('lang') lang?: string) {
+    return this.promotionsService.findAll(lang ?? 'es');
   }
 
   @Post()
@@ -113,6 +123,18 @@ export class PromotionsController {
   @Patch('reorder')
   reorder(@Body() dto: ReorderPromotionsDto) {
     return this.promotionsService.reorder(dto);
+  }
+
+  @Patch(':id/languages/:lang')
+  @ApiParam({ name: 'id', required: true })
+  @ApiParam({ name: 'lang', required: true, example: 'en' })
+  @ApiBody({ type: UpsertPromotionLanguageDto })
+  updateLanguage(
+    @Param('id') id: string,
+    @Param('lang') lang: string,
+    @Body() dto: UpsertPromotionLanguageDto,
+  ) {
+    return this.promotionsService.upsertPromotionLanguage(id, lang, dto);
   }
 
   @Patch(':id/image')
@@ -155,8 +177,9 @@ export class PromotionsController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.promotionsService.findOne(id);
+  @ApiQuery({ name: 'lang', required: false, example: 'es' })
+  findOne(@Param('id') id: string, @Query('lang') lang?: string) {
+    return this.promotionsService.findOne(id, lang ?? 'es');
   }
 
   @Put(':id')

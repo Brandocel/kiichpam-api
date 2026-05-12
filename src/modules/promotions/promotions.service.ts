@@ -9,6 +9,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CreatePromotionDto } from './dto/create-promotion.dto';
 import { UpdatePromotionDto } from './dto/update-promotion.dto';
 import { ReorderPromotionsDto } from './dto/reorder-promotions.dto';
+import { UpsertPromotionLanguageDto } from './dto/upsert-promotion-language.dto';
 
 export type PromotionImageUploadFile = {
   fieldname?: string;
@@ -20,6 +21,14 @@ export type PromotionImageUploadFile = {
   filename?: string;
 };
 
+type PromotionTranslationInput = {
+  lang: string;
+  title?: string | null;
+  subtitle?: string | null;
+  description?: string | null;
+  buttonText?: string | null;
+};
+
 @Injectable()
 export class PromotionsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -28,6 +37,10 @@ export class PromotionsService {
 
   private getNow() {
     return new Date();
+  }
+
+  private normalizeLang(lang?: string) {
+    return (lang ?? 'es').trim().toLowerCase() || 'es';
   }
 
   private getMediaSelect() {
@@ -47,13 +60,33 @@ export class PromotionsService {
     };
   }
 
-  private getPromotionInclude() {
+  private getPromotionInclude(lang = 'es') {
     const mediaSelect = this.getMediaSelect();
+    const normalizedLang = this.normalizeLang(lang);
 
     return {
+      translations: {
+        where: {
+          lang: normalizedLang,
+        },
+        select: {
+          id: true,
+          lang: true,
+          title: true,
+          subtitle: true,
+          description: true,
+          buttonText: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      },
       package: {
         include: {
-          translations: true,
+          translations: {
+            where: {
+              lang: normalizedLang,
+            },
+          },
           coverMedia: {
             select: mediaSelect,
           },
@@ -62,6 +95,9 @@ export class PromotionsService {
       campaign: {
         include: {
           translations: {
+            where: {
+              lang: normalizedLang,
+            },
             include: {
               imageMedia: {
                 select: mediaSelect,
@@ -73,6 +109,37 @@ export class PromotionsService {
       imageMedia: {
         select: mediaSelect,
       },
+    };
+  }
+
+  private mapPromotion(promotion: any) {
+    const translation = promotion.translations?.[0] ?? null;
+
+    return {
+      ...promotion,
+
+      title: translation?.title ?? promotion.title,
+      subtitle: translation?.subtitle ?? promotion.subtitle,
+      description: translation?.description ?? promotion.description,
+      buttonText: translation?.buttonText ?? promotion.buttonText,
+
+      translation,
+
+      translations: undefined,
+    };
+  }
+
+  private mapPublicResponse(data: {
+    featuredPromotion: any | null;
+    promotions: any[];
+  }) {
+    return {
+      featuredPromotion: data.featuredPromotion
+        ? this.mapPromotion(data.featuredPromotion)
+        : null,
+      promotions: data.promotions.map((promotion) =>
+        this.mapPromotion(promotion),
+      ),
     };
   }
 
@@ -239,11 +306,81 @@ export class PromotionsService {
     }
   }
 
+  private hasAnyTranslationValue(input: Partial<PromotionTranslationInput>) {
+    return (
+      input.title !== undefined ||
+      input.subtitle !== undefined ||
+      input.description !== undefined ||
+      input.buttonText !== undefined
+    );
+  }
+
+  private normalizeTranslations(
+    translations?: PromotionTranslationInput[],
+  ): PromotionTranslationInput[] {
+    const clean = (translations ?? [])
+      .map((item) => ({
+        lang: this.normalizeLang(item.lang),
+        title: item.title,
+        subtitle: item.subtitle,
+        description: item.description,
+        buttonText: item.buttonText,
+      }))
+      .filter((item) => this.hasAnyTranslationValue(item));
+
+    const langs = clean.map((item) => item.lang);
+
+    if (new Set(langs).size !== langs.length) {
+      throw new BadRequestException(
+        'No puedes repetir el mismo idioma en translations.',
+      );
+    }
+
+    return clean;
+  }
+
+  private buildLegacyTranslation(dto: CreatePromotionDto) {
+    return {
+      lang: 'es',
+      title: dto.title,
+      subtitle: dto.subtitle,
+      description: dto.description,
+      buttonText: dto.buttonText ?? 'Reservar',
+    };
+  }
+
+  private buildTranslationCreateData(item: PromotionTranslationInput) {
+    return {
+      lang: this.normalizeLang(item.lang),
+      title: item.title ?? null,
+      subtitle: item.subtitle ?? null,
+      description: item.description ?? null,
+      buttonText: item.buttonText ?? null,
+    };
+  }
+
+  private buildLanguageUpdateData(dto: UpsertPromotionLanguageDto) {
+    return {
+      ...(dto.title !== undefined ? { title: dto.title } : {}),
+      ...(dto.subtitle !== undefined ? { subtitle: dto.subtitle } : {}),
+      ...(dto.description !== undefined
+        ? { description: dto.description }
+        : {}),
+      ...(dto.buttonText !== undefined ? { buttonText: dto.buttonText } : {}),
+    };
+  }
+
   async create(dto: CreatePromotionDto) {
     this.validateDateRange(dto.startAt, dto.endAt);
     await this.validateRelations(dto);
 
-    return this.prisma.promotion.create({
+    const translations = this.normalizeTranslations(dto.translations);
+    const finalTranslations =
+      translations.length > 0
+        ? translations
+        : [this.buildLegacyTranslation(dto)];
+
+    const created = await this.prisma.promotion.create({
       data: {
         code: dto.code.trim().toUpperCase(),
         isActive: dto.isActive ?? true,
@@ -260,43 +397,58 @@ export class PromotionsService {
         packageId: dto.packageId ?? null,
         campaignId: dto.campaignId ?? null,
         imageMediaId: dto.imageMediaId ?? null,
+        translations: {
+          create: finalTranslations.map((item) =>
+            this.buildTranslationCreateData(item),
+          ),
+        },
       },
-      include: this.getPromotionInclude(),
+      include: this.getPromotionInclude('es'),
     });
+
+    return this.mapPromotion(created);
   }
 
-  async findAll() {
-    return this.prisma.promotion.findMany({
+  async findAll(lang = 'es') {
+    const normalizedLang = this.normalizeLang(lang);
+
+    const promotions = await this.prisma.promotion.findMany({
       orderBy: [
         { sectionType: 'asc' },
         { priority: 'desc' },
         { order: 'asc' },
         { createdAt: 'desc' },
       ],
-      include: this.getPromotionInclude(),
+      include: this.getPromotionInclude(normalizedLang),
     });
+
+    return promotions.map((promotion) => this.mapPromotion(promotion));
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, lang = 'es') {
+    const normalizedLang = this.normalizeLang(lang);
+
     const promotion = await this.prisma.promotion.findUnique({
       where: { id },
-      include: this.getPromotionInclude(),
+      include: this.getPromotionInclude(normalizedLang),
     });
 
     if (!promotion) {
       throw new NotFoundException('Promoción no encontrada.');
     }
 
-    return promotion;
+    return this.mapPromotion(promotion);
   }
 
   async update(id: string, dto: UpdatePromotionDto) {
-    await this.findOne(id);
+    await this.findOne(id, 'es');
 
     this.validateDateRange(dto.startAt, dto.endAt);
     await this.validateRelations(dto);
 
-    return this.prisma.promotion.update({
+    const translations = this.normalizeTranslations(dto.translations);
+
+    const updated = await this.prisma.promotion.update({
       where: { id },
       data: {
         code: dto.code === undefined ? undefined : dto.code.trim().toUpperCase(),
@@ -319,9 +471,111 @@ export class PromotionsService {
           dto.campaignId === undefined ? undefined : dto.campaignId || null,
         imageMediaId:
           dto.imageMediaId === undefined ? undefined : dto.imageMediaId || null,
+
+        ...(translations.length > 0
+          ? {
+              translations: {
+                upsert: translations.map((item) => ({
+                  where: {
+                    promotionId_lang: {
+                      promotionId: id,
+                      lang: item.lang,
+                    },
+                  },
+                  update: {
+                    ...(item.title !== undefined ? { title: item.title } : {}),
+                    ...(item.subtitle !== undefined
+                      ? { subtitle: item.subtitle }
+                      : {}),
+                    ...(item.description !== undefined
+                      ? { description: item.description }
+                      : {}),
+                    ...(item.buttonText !== undefined
+                      ? { buttonText: item.buttonText }
+                      : {}),
+                  },
+                  create: this.buildTranslationCreateData(item),
+                })),
+              },
+            }
+          : {}),
       },
-      include: this.getPromotionInclude(),
+      include: this.getPromotionInclude('es'),
     });
+
+    return this.mapPromotion(updated);
+  }
+
+  async upsertPromotionLanguage(
+    id: string,
+    lang: string,
+    dto: UpsertPromotionLanguageDto,
+  ) {
+    const normalizedLang = this.normalizeLang(lang);
+
+    if (!this.hasAnyTranslationValue(dto)) {
+      throw new BadRequestException(
+        'Debes enviar al menos un campo para actualizar el idioma.',
+      );
+    }
+
+    const promotion = await this.prisma.promotion.findUnique({
+      where: { id },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!promotion) {
+      throw new NotFoundException('Promoción no encontrada.');
+    }
+
+    await this.prisma.promotionTranslation.upsert({
+      where: {
+        promotionId_lang: {
+          promotionId: id,
+          lang: normalizedLang,
+        },
+      },
+      update: this.buildLanguageUpdateData(dto),
+      create: {
+        promotionId: id,
+        lang: normalizedLang,
+        title: dto.title ?? null,
+        subtitle: dto.subtitle ?? null,
+        description: dto.description ?? null,
+        buttonText: dto.buttonText ?? null,
+      },
+    });
+
+    if (normalizedLang === 'es') {
+      await this.prisma.promotion.update({
+        where: { id },
+        data: {
+          ...(dto.title !== undefined && dto.title !== null
+            ? { title: dto.title }
+            : {}),
+          ...(dto.subtitle !== undefined ? { subtitle: dto.subtitle } : {}),
+          ...(dto.description !== undefined
+            ? { description: dto.description }
+            : {}),
+          ...(dto.buttonText !== undefined
+            ? { buttonText: dto.buttonText }
+            : {}),
+        },
+      });
+    }
+
+    const updated = await this.prisma.promotion.findUnique({
+      where: { id },
+      include: this.getPromotionInclude(normalizedLang),
+    });
+
+    return {
+      success: true,
+      message: `Traducción ${normalizedLang} actualizada correctamente.`,
+      data: this.mapPromotion(updated),
+    };
   }
 
   async replaceImage(id: string, file: PromotionImageUploadFile) {
@@ -369,17 +623,26 @@ export class PromotionsService {
         data: {
           imageMediaId: newImage.id,
         },
-        include: this.getPromotionInclude(),
+        include: this.getPromotionInclude('es'),
       });
     });
 
     await this.deleteOldImageIfPossible(oldImageMediaId);
 
-    return updatedPromotion;
+    return this.mapPromotion(updatedPromotion);
   }
 
   async remove(id: string) {
-    await this.findOne(id);
+    const promotion = await this.prisma.promotion.findUnique({
+      where: { id },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!promotion) {
+      throw new NotFoundException('Promoción no encontrada.');
+    }
 
     return this.prisma.promotion.delete({
       where: { id },
@@ -393,14 +656,17 @@ export class PromotionsService {
         data: {
           order: item.order,
         },
-        include: this.getPromotionInclude(),
+        include: this.getPromotionInclude('es'),
       }),
     );
 
-    return this.prisma.$transaction(transaction);
+    const updated = await this.prisma.$transaction(transaction);
+
+    return updated.map((promotion) => this.mapPromotion(promotion));
   }
 
-  async findPublicPromotions() {
+  async findPublicPromotions(lang = 'es') {
+    const normalizedLang = this.normalizeLang(lang);
     const dateFilter = this.buildDateFilter();
 
     const monthlyPromotion = await this.prisma.promotion.findFirst({
@@ -414,7 +680,7 @@ export class PromotionsService {
         { order: 'asc' },
         { createdAt: 'desc' },
       ],
-      include: this.getPromotionInclude(),
+      include: this.getPromotionInclude(normalizedLang),
     });
 
     const standardPromotions = await this.prisma.promotion.findMany({
@@ -428,21 +694,21 @@ export class PromotionsService {
         { order: 'asc' },
         { createdAt: 'desc' },
       ],
-      include: this.getPromotionInclude(),
+      include: this.getPromotionInclude(normalizedLang),
     });
 
     if (monthlyPromotion) {
-      return {
+      return this.mapPublicResponse({
         featuredPromotion: monthlyPromotion,
         promotions: standardPromotions,
-      };
+      });
     }
 
     const [fallbackPromotion, ...restPromotions] = standardPromotions;
 
-    return {
+    return this.mapPublicResponse({
       featuredPromotion: fallbackPromotion ?? null,
       promotions: restPromotions,
-    };
+    });
   }
 }

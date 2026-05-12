@@ -631,6 +631,8 @@ model Promotion {
   campaign   Campaign?   @relation(fields: [campaignId], references: [id], onDelete: SetNull)
   imageMedia MediaAsset? @relation(fields: [imageMediaId], references: [id], onDelete: SetNull)
 
+  translations PromotionTranslation[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -644,6 +646,27 @@ model Promotion {
   @@index([campaignId])
   @@index([imageMediaId])
   @@map("promotions")
+}
+
+model PromotionTranslation {
+  id          String @id @default(uuid())
+  promotionId String
+  lang        String
+
+  title       String?
+  subtitle    String?
+  description String?
+  buttonText  String?
+
+  promotion Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([promotionId, lang])
+  @@index([promotionId])
+  @@index([lang])
+  @@map("promotion_translations")
 }
 
 model PromotionPackageOption {
