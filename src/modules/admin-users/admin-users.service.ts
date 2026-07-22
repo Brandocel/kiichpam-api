@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   Logger,
@@ -128,6 +129,16 @@ export class AdminUsersService implements OnModuleInit {
       data.isActive = dto.isActive;
     }
 
+    // Evitar quedarse sin administrador: si este cambio degradaría o
+    // desactivaría al último SUPER_ADMIN activo, lo bloqueamos.
+    const willLoseSuperAdmin =
+      (dto.role !== undefined && dto.role !== AdminRole.SUPER_ADMIN) ||
+      dto.isActive === false;
+
+    if (willLoseSuperAdmin) {
+      await this.ensureNotLastSuperAdmin(existing);
+    }
+
     const user = await this.prisma.adminUser.update({
       where: { id },
       data,
@@ -143,9 +154,38 @@ export class AdminUsersService implements OnModuleInit {
       throw new NotFoundException('Usuario no encontrado.');
     }
 
+    await this.ensureNotLastSuperAdmin(existing);
+
     const user = await this.prisma.adminUser.delete({ where: { id } });
 
     return this.toSafe(user);
+  }
+
+  /**
+   * Lanza un error si el usuario es el último SUPER_ADMIN activo del sistema,
+   * para no dejar el panel sin administrador.
+   */
+  private async ensureNotLastSuperAdmin(user: AdminUser): Promise<void> {
+    const isActiveSuperAdmin =
+      user.role === AdminRole.SUPER_ADMIN && user.isActive;
+
+    if (!isActiveSuperAdmin) {
+      return;
+    }
+
+    const otherActiveSuperAdmins = await this.prisma.adminUser.count({
+      where: {
+        role: AdminRole.SUPER_ADMIN,
+        isActive: true,
+        id: { not: user.id },
+      },
+    });
+
+    if (otherActiveSuperAdmins === 0) {
+      throw new BadRequestException(
+        'No puedes degradar, desactivar ni eliminar al último SUPER_ADMIN activo. Crea o asciende otro administrador primero.',
+      );
+    }
   }
 
   /**
