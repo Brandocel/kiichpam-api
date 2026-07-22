@@ -13,6 +13,18 @@ enum UserRole {
   CUSTOMER
 }
 
+/// Roles del panel administrativo interno.
+/// Independiente de UserRole (que aplica a clientes finales).
+enum AdminRole {
+  SUPER_ADMIN
+  ADMIN
+  MANAGER
+  SALES
+  ACCOUNTING
+  VIEWER
+  AUDITOR
+}
+
 enum CouponType {
   PERCENT
   FIXED
@@ -69,6 +81,21 @@ model User {
   role      UserRole @default(CUSTOMER)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+/// Usuarios internos del panel administrativo.
+/// El password se guarda hasheado (scrypt) y nunca se expone en las respuestas.
+model AdminUser {
+  id        String    @id @default(uuid())
+  name      String
+  email     String    @unique
+  password  String
+  role      AdminRole @default(VIEWER)
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@map("admin_user")
 }
 
 model Package {
@@ -264,6 +291,8 @@ model Reservation {
   fbclid      String?
   ttclid      String?
   gclid       String?
+  landingPage String?
+  referrer    String?
 
   couponCode        String?
   couponDiscountMXN Int     @default(0)

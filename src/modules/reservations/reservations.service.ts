@@ -104,6 +104,8 @@ export class ReservationsService {
           fbclid: dto.fbclid ?? null,
           ttclid: dto.ttclid ?? null,
           gclid: dto.gclid ?? null,
+          landingPage: dto.landingPage ?? null,
+          referrer: dto.referrer ?? null,
 
           couponCode: calculation.couponSummary?.code ?? null,
           couponDiscountMXN: calculation.pricing.couponDiscountMXN,
@@ -475,6 +477,8 @@ export class ReservationsService {
             fbclid: reservation.fbclid,
             ttclid: reservation.ttclid,
             gclid: reservation.gclid,
+            landingPage: reservation.landingPage,
+            referrer: reservation.referrer,
           },
 
           passengers: {
@@ -814,6 +818,8 @@ export class ReservationsService {
       fbclid: dto.fbclid ?? null,
       ttclid: dto.ttclid ?? null,
       gclid: dto.gclid ?? null,
+      landingPage: dto.landingPage ?? null,
+      referrer: dto.referrer ?? null,
     };
   }
 
@@ -835,6 +841,8 @@ export class ReservationsService {
         fbclid: reservation.fbclid ?? null,
         ttclid: reservation.ttclid ?? null,
         gclid: reservation.gclid ?? null,
+        landingPage: reservation.landingPage ?? null,
+        referrer: reservation.referrer ?? null,
       },
     };
   }

@@ -114,6 +114,24 @@ export class QuoteDto {
   @IsString()
   gclid?: string;
 
+  @ApiPropertyOptional({
+    example:
+      'https://kiichpamxunaan.com/es?utm_source=facebook&utm_medium=cpc&fbclid=IwAR...',
+    description:
+      'URL completa de aterrizaje con la que llegó el visitante (evidencia de rastreo)',
+  })
+  @IsOptional()
+  @IsString()
+  landingPage?: string;
+
+  @ApiPropertyOptional({
+    example: 'https://www.google.com/',
+    description: 'document.referrer del navegador al capturar la atribución',
+  })
+  @IsOptional()
+  @IsString()
+  referrer?: string;
+
   @ApiPropertyOptional({ example: 'es' })
   @IsOptional()
   @IsString()

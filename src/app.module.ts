@@ -21,6 +21,7 @@ import { AgentModule } from './modules/agent/agent.module';
 import { AiModule } from './modules/ai/ai.module';
 import { PromotionsModule } from './modules/promotions/promotions.module';
 import { ContactModule } from './modules/contact/contact.module';
+import { AdminUsersModule } from './modules/admin-users/admin-users.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { ContactModule } from './modules/contact/contact.module';
     AiModule,
     PromotionsModule,
     ContactModule,
+    AdminUsersModule,
   ],
 })
 export class AppModule {}

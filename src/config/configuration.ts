@@ -19,6 +19,16 @@ export default () => ({
     clientSecret: process.env.API_CLIENT_SECRET,
   },
 
+  /**
+   * Credenciales para sembrar el SUPER_ADMIN inicial del panel administrativo.
+   * Solo se usan si la tabla admin_user está vacía.
+   */
+  adminSeed: {
+    email: process.env.ADMIN_SEED_EMAIL,
+    password: process.env.ADMIN_SEED_PASSWORD,
+    name: process.env.ADMIN_SEED_NAME,
+  },
+
   swagger: {
     user: process.env.SWAGGER_USER,
     password: process.env.SWAGGER_PASSWORD,

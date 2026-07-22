@@ -95,6 +95,23 @@ class EnvVars {
   @IsString()
   @IsOptional()
   GEMINI_API_KEY?: string;
+
+  /**
+   * Credenciales opcionales para sembrar el SUPER_ADMIN inicial del panel.
+   * Solo se usan si la tabla admin_user está vacía.
+   */
+  @IsString()
+  @IsOptional()
+  ADMIN_SEED_EMAIL?: string;
+
+  @IsString()
+  @IsOptional()
+  @MinLength(8)
+  ADMIN_SEED_PASSWORD?: string;
+
+  @IsString()
+  @IsOptional()
+  ADMIN_SEED_NAME?: string;
 }
 
 export function validateEnv(config: Record<string, unknown>) {
