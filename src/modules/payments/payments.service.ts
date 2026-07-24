@@ -8,6 +8,7 @@ import Stripe from 'stripe';
 import { PrismaService } from '../../prisma/prisma.service';
 import { GoogleCalendarService } from '../google-calendar/google-calendar.service';
 import { ReservationMailService } from '../reservations/reservation-mail.service';
+import { PaymentRecordsService } from './payment-records.service';
 
 type RefundReason = 'duplicate' | 'fraudulent' | 'requested_by_customer';
 
@@ -20,6 +21,7 @@ export class PaymentsService {
     private readonly prisma: PrismaService,
     private readonly googleCalendarService: GoogleCalendarService,
     private readonly reservationMailService: ReservationMailService,
+    private readonly paymentRecordsService: PaymentRecordsService,
   ) {
     const secretKey = process.env.STRIPE_SECRET_KEY;
 
@@ -227,6 +229,11 @@ export class PaymentsService {
       `PaymentIntent creado: ${paymentIntent.id} para folio ${reservation.folio} por $${stripeAmount / 100} MXN`,
     );
 
+    await this.paymentRecordsService.registerFromPaymentIntent(
+      reservation,
+      paymentIntent,
+    );
+
     return this.buildCardResponse(reservation, paymentIntent, currency);
   }
 
@@ -291,6 +298,11 @@ export class PaymentsService {
           status: 'PROCESSING_PAYMENT',
         },
       });
+
+      await this.paymentRecordsService.registerFromPaymentIntent(
+        reservation,
+        existingOxxoIntent,
+      );
 
       return this.buildOxxoResponse(
         {
@@ -368,6 +380,11 @@ export class PaymentsService {
 
     this.logger.log(
       `Referencia OXXO generada: ${paymentIntent.id} para folio ${reservation.folio} por $${stripeAmount / 100} MXN`,
+    );
+
+    await this.paymentRecordsService.registerFromPaymentIntent(
+      reservation,
+      paymentIntent,
     );
 
     return this.buildOxxoResponse(
@@ -531,6 +548,16 @@ export class PaymentsService {
         },
       },
     });
+
+    /*
+      También reconstruye el movimiento en la tabla Payment.
+      Sirve para reservaciones antiguas que se pagaron antes de
+      que el cobro quedara registrado en base de datos.
+    */
+    await this.paymentRecordsService.registerFromPaymentIntent(
+      updatedReservation,
+      paymentIntent,
+    );
 
     if (newStatus === 'PAID') {
       await this.syncReservationToGoogleCalendar(normalizedFolio);
@@ -902,6 +929,11 @@ export class PaymentsService {
       },
     });
 
+    await this.paymentRecordsService.registerFromPaymentIntent(
+      updatedReservation,
+      paymentIntent,
+    );
+
     await this.syncReservationToGoogleCalendar(folio);
     await this.sendPaidReservationEmailsFromWebhook(updatedReservation);
   }
@@ -933,6 +965,11 @@ export class PaymentsService {
         status: 'PAYMENT_FAILED',
       },
     });
+
+    await this.paymentRecordsService.registerFromPaymentIntent(
+      reservation,
+      paymentIntent,
+    );
   }
 
   private async handlePaymentIntentProcessing(
@@ -962,6 +999,11 @@ export class PaymentsService {
         status: 'PROCESSING_PAYMENT',
       },
     });
+
+    await this.paymentRecordsService.registerFromPaymentIntent(
+      reservation,
+      paymentIntent,
+    );
   }
 
   private async handlePaymentIntentCanceled(
@@ -991,6 +1033,11 @@ export class PaymentsService {
         status: 'CANCELED',
       },
     });
+
+    await this.paymentRecordsService.registerFromPaymentIntent(
+      reservation,
+      paymentIntent,
+    );
   }
 
   private async handlePaymentIntentRequiresAction(
@@ -1020,6 +1067,11 @@ export class PaymentsService {
         status: 'PROCESSING_PAYMENT',
       },
     });
+
+    await this.paymentRecordsService.registerFromPaymentIntent(
+      reservation,
+      paymentIntent,
+    );
   }
 
   private validateStripeAmountMatchesReservation(
