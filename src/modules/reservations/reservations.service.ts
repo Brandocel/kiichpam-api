@@ -10,6 +10,7 @@ import { ReservationPricingService } from './reservation-pricing.service';
 import { UpdateReservationContactDto } from './dto/update-reservation-contact.dto';
 import { ReservationMailService } from './reservation-mail.service';
 import { QueryReservationsDto } from './dto/query-reservations.dto';
+import { SalesAgentsService } from '../sales-agents/sales-agents.service';
 
 type MoneyLike =
   | number
@@ -50,13 +51,18 @@ export class ReservationsService {
     private readonly pricingService: ReservationPricingService,
     private readonly campaignsService: CampaignsService,
     private readonly reservationMailService: ReservationMailService,
+    private readonly salesAgentsService: SalesAgentsService,
   ) {}
 
   async quote(dto: QuoteDto) {
     const calculation = await this.pricingService.calculate(dto);
     const reference = this.resolveReservationReference(dto);
+    const agent = await this.salesAgentsService.resolveActiveByCode(
+      dto.agentCode,
+    );
 
     return {
+      agent: this.buildAgentSummary(agent),
       package: calculation.packageSummary,
       pricing: calculation.pricing,
       passengers: calculation.passengers,
@@ -78,6 +84,12 @@ export class ReservationsService {
     const calculation = await this.pricingService.calculate(dto);
     const reference = this.resolveReservationReference(dto);
     const attribution = this.buildDtoAttribution(dto, reference);
+
+    // Un código inválido o de un agente desactivado no rompe la compra:
+    // simplemente la venta queda sin atribuir.
+    const agent = await this.salesAgentsService.resolveActiveByCode(
+      dto.agentCode,
+    );
 
     const reservation = await this.prisma.$transaction(async (tx) => {
       const folio = await this.generateFolio(tx);
@@ -106,6 +118,10 @@ export class ReservationsService {
           gclid: dto.gclid ?? null,
           landingPage: dto.landingPage ?? null,
           referrer: dto.referrer ?? null,
+
+          salesAgentId: agent?.id ?? null,
+          salesAgentCode: agent?.code ?? null,
+          agentCommissionPercent: agent?.commissionPercent ?? null,
 
           couponCode: calculation.couponSummary?.code ?? null,
           couponDiscountMXN: calculation.pricing.couponDiscountMXN,
@@ -168,6 +184,22 @@ export class ReservationsService {
                   attribution,
                 },
               },
+              ...(agent
+                ? [
+                    {
+                      folio,
+                      step: 'AGENT_ATTRIBUTED',
+                      message: `Venta atribuida al agente ${agent.name}`,
+                      metadata: {
+                        agentCode: agent.code,
+                        agentName: agent.name,
+                        agentType: agent.type,
+                        commissionPercent: agent.commissionPercent,
+                        requestedCode: dto.agentCode ?? null,
+                      },
+                    },
+                  ]
+                : []),
             ],
           },
         },
@@ -175,6 +207,7 @@ export class ReservationsService {
           extras: true,
           package: true,
           traces: true,
+          salesAgent: true,
         },
       });
 
@@ -221,6 +254,7 @@ export class ReservationsService {
     const packageCode = query.packageCode?.trim().toUpperCase();
     const email = query.email?.trim().toLowerCase();
     const reference = query.reference?.trim();
+    const agentCode = query.agentCode?.trim().toUpperCase();
 
     const allowedSortBy = ['createdAt', 'visitDate', 'totalMXN'];
     const sortBy = allowedSortBy.includes(query.sortBy ?? '')
@@ -270,6 +304,12 @@ export class ReservationsService {
               contains: reference,
               mode: 'insensitive',
             },
+          }
+        : {}),
+
+      ...(agentCode
+        ? {
+            salesAgentCode: agentCode,
           }
         : {}),
 
@@ -383,6 +423,20 @@ export class ReservationsService {
                   mode: 'insensitive',
                 },
               },
+              {
+                salesAgentCode: {
+                  contains: search,
+                  mode: 'insensitive',
+                },
+              },
+              {
+                salesAgent: {
+                  name: {
+                    contains: search,
+                    mode: 'insensitive',
+                  },
+                },
+              },
             ],
           }
         : {}),
@@ -403,6 +457,7 @@ export class ReservationsService {
         include: {
           extras: true,
           payments: true,
+          salesAgent: true,
           package: {
             include: {
               coverMedia: true,
@@ -540,6 +595,7 @@ export class ReservationsService {
         extras: true,
         payments: true,
         traces: true,
+        salesAgent: true,
         package: {
           include: {
             coverMedia: true,
@@ -577,6 +633,7 @@ export class ReservationsService {
         extras: true,
         payments: true,
         traces: true,
+        salesAgent: true,
         package: {
           include: {
             coverMedia: true,
@@ -605,6 +662,7 @@ export class ReservationsService {
         extras: true,
         payments: true,
         traces: true,
+        salesAgent: true,
         package: {
           include: {
             coverMedia: true,
@@ -645,6 +703,7 @@ export class ReservationsService {
         extras: true,
         payments: true,
         traces: true,
+        salesAgent: true,
         package: {
           include: {
             coverMedia: true,
@@ -796,6 +855,7 @@ export class ReservationsService {
         extras: true,
         payments: true,
         traces: true,
+        salesAgent: true,
         package: {
           include: {
             coverMedia: true,
@@ -823,6 +883,54 @@ export class ReservationsService {
     };
   }
 
+  /**
+   * Resumen del agente para las respuestas públicas (quote/create). No expone
+   * comisión: eso es información interna del panel.
+   */
+  private buildAgentSummary(
+    agent: {
+      code: string;
+      name: string;
+      company: string | null;
+      type: string;
+    } | null,
+  ) {
+    if (!agent) {
+      return null;
+    }
+
+    return {
+      code: agent.code,
+      name: agent.name,
+      company: agent.company,
+      type: agent.type,
+    };
+  }
+
+  /**
+   * Agente atribuido a una reservación ya guardada. Prefiere la relación viva,
+   * pero cae al snapshot para que el histórico sobreviva si el agente se borró.
+   */
+  private buildStoredAgent(reservation: MoneyRecord) {
+    const code = reservation.salesAgentCode ?? reservation.salesAgent?.code;
+
+    if (!code) {
+      return null;
+    }
+
+    return {
+      code,
+      name: reservation.salesAgent?.name ?? code,
+      company: reservation.salesAgent?.company ?? null,
+      type: reservation.salesAgent?.type ?? null,
+      commissionPercent:
+        reservation.agentCommissionPercent ??
+        reservation.salesAgent?.commissionPercent ??
+        null,
+      isActive: reservation.salesAgent?.isActive ?? false,
+    };
+  }
+
   private mapReservationWithAttribution<T extends MoneyRecord>(reservation: T) {
     const reference = this.resolveStoredReservationReference(reservation);
     const normalizedReservation =
@@ -831,6 +939,7 @@ export class ReservationsService {
     return {
       ...normalizedReservation,
       reference,
+      agent: this.buildStoredAgent(reservation),
       attribution: {
         reference,
         utmSource: reservation.utmSource ?? null,

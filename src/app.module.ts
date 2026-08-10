@@ -22,6 +22,7 @@ import { AiModule } from './modules/ai/ai.module';
 import { PromotionsModule } from './modules/promotions/promotions.module';
 import { ContactModule } from './modules/contact/contact.module';
 import { AdminUsersModule } from './modules/admin-users/admin-users.module';
+import { SalesAgentsModule } from './modules/sales-agents/sales-agents.module';
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { AdminUsersModule } from './modules/admin-users/admin-users.module';
     PromotionsModule,
     ContactModule,
     AdminUsersModule,
+    SalesAgentsModule,
   ],
 })
 export class AppModule {}

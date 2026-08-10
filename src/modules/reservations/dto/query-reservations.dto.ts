@@ -37,6 +37,10 @@ export class QueryReservationsDto {
 
   @IsOptional()
   @IsString()
+  agentCode?: string;
+
+  @IsOptional()
+  @IsString()
   from?: string;
 
   @IsOptional()

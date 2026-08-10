@@ -25,6 +25,17 @@ enum AdminRole {
   AUDITOR
 }
 
+/// Tipo de agente de reservas. Sirve para agrupar comisiones y para
+/// derivar el origen comercial de la venta (Hotel, Taxis, Agencias...).
+enum SalesAgentType {
+  INTERNAL
+  HOTEL
+  TAXI
+  AGENCY
+  INFLUENCER
+  OTHER
+}
+
 enum CouponType {
   PERCENT
   FIXED
@@ -96,6 +107,40 @@ model AdminUser {
   updatedAt DateTime  @updatedAt
 
   @@map("admin_user")
+}
+
+/// Agente de reservas: hotel, taxista, agencia, influencer o vendedor interno.
+/// Cada agente tiene un `code` único con el que se arma su link de venta
+/// (`/reservar?ag=CODE`). No inicia sesión en el panel: es una entidad pasiva
+/// que solo sirve para atribuir la venta y calcular su comisión.
+model SalesAgent {
+  id   String @id @default(uuid())
+  code String @unique
+
+  name    String
+  email   String?
+  phone   String?
+  company String?
+
+  type SalesAgentType @default(INTERNAL)
+
+  /// Porcentaje de comisión sobre el total de la reservación pagada.
+  /// Se copia a la reservación al momento de la venta para que un cambio
+  /// posterior no altere el histórico.
+  commissionPercent Float @default(0)
+
+  isActive Boolean @default(true)
+  notes    String?
+
+  reservations Reservation[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([code])
+  @@index([isActive])
+  @@index([type])
+  @@map("sales_agents")
 }
 
 model Package {
@@ -294,6 +339,16 @@ model Reservation {
   landingPage String?
   referrer    String?
 
+  /// Agente de reservas que trajo la venta. Es una dimensión aparte del
+  /// `reference`/UTM: el canal sigue siendo el canal (Google, Facebook...) y
+  /// el agente indica quién cerró. `salesAgentCode` y
+  /// `agentCommissionPercent` son snapshots para que el histórico sobreviva
+  /// si el agente se borra o cambia su comisión.
+  salesAgentId           String?
+  salesAgentCode         String?
+  agentCommissionPercent Float?
+  salesAgent             SalesAgent? @relation(fields: [salesAgentId], references: [id], onDelete: SetNull)
+
   couponCode        String?
   couponDiscountMXN Int     @default(0)
 
@@ -335,6 +390,8 @@ model Reservation {
   @@index([reference])
   @@index([utmSource])
   @@index([utmCampaign])
+  @@index([salesAgentId])
+  @@index([salesAgentCode])
 }
 
 model ReservationTrace {

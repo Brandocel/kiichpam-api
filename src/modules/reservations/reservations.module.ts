@@ -9,6 +9,7 @@ import { PrismaModule } from '../../prisma/prisma.module';
 import { CouponsModule } from '../coupons/coupons.module';
 import { CampaignsModule } from '../campaigns/campaigns.module';
 import { CommonModule } from '../../common/common.module';
+import { SalesAgentsModule } from '../sales-agents/sales-agents.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { CommonModule } from '../../common/common.module';
     PrismaModule,
     CouponsModule,
     CampaignsModule,
+    SalesAgentsModule,
   ],
   controllers: [ReservationsController],
   providers: [

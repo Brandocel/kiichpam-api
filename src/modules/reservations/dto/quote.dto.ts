@@ -132,6 +132,15 @@ export class QuoteDto {
   @IsString()
   referrer?: string;
 
+  @ApiPropertyOptional({
+    example: 'MARIA-LOPEZ',
+    description:
+      'Código del agente de reservas que trajo la venta (param `ag` del link). Es una dimensión aparte del canal: no reemplaza reference ni utmSource.',
+  })
+  @IsOptional()
+  @IsString()
+  agentCode?: string;
+
   @ApiPropertyOptional({ example: 'es' })
   @IsOptional()
   @IsString()
