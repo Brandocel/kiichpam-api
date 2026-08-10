@@ -494,6 +494,7 @@ export class ReservationsService {
         packageCode: packageCode ?? null,
         email: email ?? null,
         reference: reference ?? null,
+        agentCode: agentCode ?? null,
         from: query.from ?? null,
         to: query.to ?? null,
         sortBy,
@@ -535,6 +536,10 @@ export class ReservationsService {
             landingPage: reservation.landingPage,
             referrer: reservation.referrer,
           },
+
+          agent: this.buildStoredAgent(reservation),
+          salesAgentCode: reservation.salesAgentCode,
+          agentCommissionPercent: reservation.agentCommissionPercent,
 
           passengers: {
             adults: reservation.adults,
