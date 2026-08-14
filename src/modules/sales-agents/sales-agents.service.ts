@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma, SalesAgent } from '@prisma/client';
+import { randomBytes } from 'node:crypto';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateSalesAgentDto } from './dto/create-sales-agent.dto';
@@ -26,6 +27,13 @@ export type PublicSalesAgent = {
   company: string | null;
   type: SalesAgent['type'];
 };
+
+/**
+ * Alfabeto del token público: sin 0/O/1/I/L para que nadie confunda
+ * caracteres al dictarlo o transcribirlo por teléfono.
+ */
+const TOKEN_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const TOKEN_LENGTH = 8;
 
 @Injectable()
 export class SalesAgentsService {
@@ -72,6 +80,7 @@ export class SalesAgentsService {
     return this.prisma.salesAgent.create({
       data: {
         code,
+        linkToken: await this.generateUniqueLinkToken(),
         name: dto.name.trim(),
         email: dto.email?.trim().toLowerCase() || null,
         phone: dto.phone?.trim() || null,
@@ -166,9 +175,30 @@ export class SalesAgentsService {
   }
 
   /**
-   * Resuelve un agente activo por su código. Lo usa el flujo de reservación
-   * para atribuir la venta. Devuelve null si no existe o está desactivado, de
-   * modo que un link viejo nunca rompe la compra: solo deja de atribuir.
+   * Regenera el token público. Útil si un link se filtró o si el agente
+   * quiere dejar de usar el anterior. El `code` no cambia, así que el
+   * histórico y los reportes siguen intactos.
+   */
+  async regenerateLinkToken(id: string) {
+    const existing = await this.prisma.salesAgent.findUnique({ where: { id } });
+
+    if (!existing) {
+      throw new NotFoundException('Agente no encontrado.');
+    }
+
+    return this.prisma.salesAgent.update({
+      where: { id },
+      data: { linkToken: await this.generateUniqueLinkToken() },
+    });
+  }
+
+  /**
+   * Resuelve un agente activo a partir del valor que viene en `?ag=`.
+   *
+   * Acepta tanto el token público como el código legible: los links repartidos
+   * antes de que existiera el token siguen atribuyendo igual. Devuelve null si
+   * no existe o está desactivado, de modo que un link viejo nunca rompe la
+   * compra: solo deja de atribuir.
    */
   async resolveActiveByCode(code?: string | null): Promise<SalesAgent | null> {
     const normalized = this.normalizeCode(code ?? '');
@@ -177,8 +207,10 @@ export class SalesAgentsService {
       return null;
     }
 
-    const agent = await this.prisma.salesAgent.findUnique({
-      where: { code: normalized },
+    const agent = await this.prisma.salesAgent.findFirst({
+      where: {
+        OR: [{ linkToken: normalized }, { code: normalized }],
+      },
     });
 
     if (!agent || !agent.isActive) {
@@ -391,6 +423,41 @@ export class SalesAgentsService {
       .replace(/[^A-Z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '')
       .slice(0, 40);
+  }
+
+  /**
+   * Token aleatorio verificando que no exista ya. El espacio es de 31^8
+   * (~850 mil millones), así que una colisión es casi imposible, pero se
+   * reintenta igual antes que arriesgar un choque en el índice único.
+   */
+  private async generateUniqueLinkToken(): Promise<string> {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const token = this.randomToken();
+
+      const existing = await this.prisma.salesAgent.findUnique({
+        where: { linkToken: token },
+      });
+
+      if (!existing) {
+        return token;
+      }
+    }
+
+    throw new ConflictException(
+      'No se pudo generar un link único para el agente. Intenta de nuevo.',
+    );
+  }
+
+  private randomToken(): string {
+    const bytes = randomBytes(TOKEN_LENGTH);
+
+    let token = '';
+
+    for (let index = 0; index < TOKEN_LENGTH; index += 1) {
+      token += TOKEN_ALPHABET[bytes[index] % TOKEN_ALPHABET.length];
+    }
+
+    return token;
   }
 
   private async ensureCodeIsFree(code: string): Promise<void> {

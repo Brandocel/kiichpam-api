@@ -117,6 +117,12 @@ model SalesAgent {
   id   String @id @default(uuid())
   code String @unique
 
+  /// Token opaco que viaja en el link público (`/reservar?ag=KX7F2MQD`).
+  /// Existe para que el nombre del agente no quede expuesto en la URL que ve
+  /// el cliente. Se puede regenerar si un link se filtra; `code` sigue
+  /// resolviendo para no romper links ya repartidos.
+  linkToken String @unique
+
   name    String
   email   String?
   phone   String?
@@ -138,6 +144,7 @@ model SalesAgent {
   updatedAt DateTime @updatedAt
 
   @@index([code])
+  @@index([linkToken])
   @@index([isActive])
   @@index([type])
   @@map("sales_agents")

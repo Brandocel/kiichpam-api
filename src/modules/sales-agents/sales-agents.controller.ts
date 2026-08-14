@@ -75,6 +75,15 @@ export class SalesAgentsController {
     return this.service.update(id, dto);
   }
 
+  @Post(':id/regenerate-link')
+  @IntegrationProtected()
+  @ApiOperation({
+    summary: 'Generar un link nuevo para el agente (invalida el anterior)',
+  })
+  regenerateLink(@Param('id') id: string) {
+    return this.service.regenerateLinkToken(id);
+  }
+
   @Delete(':id')
   @IntegrationProtected()
   @ApiOperation({ summary: 'Eliminar un agente de reservas' })
