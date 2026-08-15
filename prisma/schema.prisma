@@ -23,6 +23,9 @@ enum AdminRole {
   ACCOUNTING
   VIEWER
   AUDITOR
+  /// Agente de reservas con acceso propio al panel. Captura reservaciones a
+  /// nombre suyo; la atribución sale de su sesión, no de un campo editable.
+  AGENT
 }
 
 /// Tipo de agente de reservas. Sirve para agrupar comisiones y para
@@ -106,6 +109,9 @@ model AdminUser {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
+  /// Si esta cuenta pertenece a un agente de reservas, aquí está el vínculo.
+  salesAgent SalesAgent?
+
   @@map("admin_user")
 }
 
@@ -137,6 +143,12 @@ model SalesAgent {
 
   isActive Boolean @default(true)
   notes    String?
+
+  /// Cuenta con la que el agente entra al panel. Opcional: un agente puede
+  /// existir solo con su link, sin acceso. Cuando existe, la atribución de lo
+  /// que captura sale de su sesión y no de un campo que pueda editar.
+  adminUserId String?    @unique
+  adminUser   AdminUser? @relation(fields: [adminUserId], references: [id], onDelete: SetNull)
 
   reservations Reservation[]
 

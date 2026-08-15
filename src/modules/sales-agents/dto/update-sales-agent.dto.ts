@@ -9,6 +9,7 @@ import {
   IsString,
   Max,
   Min,
+  MinLength,
 } from 'class-validator';
 
 export class UpdateSalesAgentDto {
@@ -58,4 +59,20 @@ export class UpdateSalesAgentDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  /**
+   * Alta o cambio de contraseña del panel. Si el agente todavía no tenía
+   * cuenta, se le crea; si ya tenía, se le actualiza la contraseña.
+   */
+  @ApiPropertyOptional({ example: 'NuevaContraseña123', minLength: 8 })
+  @IsOptional()
+  @IsString()
+  @MinLength(8)
+  panelPassword?: string;
+
+  /** Revoca el acceso al panel sin borrar al agente ni su historial. */
+  @ApiPropertyOptional({ example: false })
+  @IsOptional()
+  @IsBoolean()
+  panelAccessEnabled?: boolean;
 }

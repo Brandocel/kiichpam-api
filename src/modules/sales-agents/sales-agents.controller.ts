@@ -47,6 +47,20 @@ export class SalesAgentsController {
     return this.service.performance(query);
   }
 
+  /**
+   * PROTEGIDO
+   * Resuelve el agente ligado a una cuenta del panel. Lo consulta el login
+   * para grabar el código del agente en la sesión.
+   */
+  @Get('by-admin-user/:adminUserId')
+  @IntegrationProtected()
+  @ApiOperation({
+    summary: 'Consultar el agente ligado a una cuenta del panel',
+  })
+  findByAdminUser(@Param('adminUserId') adminUserId: string) {
+    return this.service.findByAdminUserId(adminUserId);
+  }
+
   @Get()
   @IntegrationProtected()
   @ApiOperation({ summary: 'Listar agentes de reservas' })

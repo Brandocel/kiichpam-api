@@ -1,12 +1,14 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, SalesAgent } from '@prisma/client';
+import { AdminRole, Prisma, SalesAgent } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
 
 import { PrismaService } from '../../prisma/prisma.service';
+import { hashPassword } from '../admin-users/password.util';
 import { CreateSalesAgentDto } from './dto/create-sales-agent.dto';
 import { QuerySalesAgentPerformanceDto } from './dto/query-sales-agent-performance.dto';
 import { UpdateSalesAgentDto } from './dto/update-sales-agent.dto';
@@ -42,6 +44,9 @@ export class SalesAgentsService {
   async findAll() {
     const agents = await this.prisma.salesAgent.findMany({
       orderBy: [{ isActive: 'desc' }, { createdAt: 'asc' }],
+      include: {
+        adminUser: { select: { id: true, email: true, isActive: true } },
+      },
     });
 
     const counts = await this.prisma.reservation.groupBy({
@@ -74,23 +79,95 @@ export class SalesAgentsService {
 
   async create(dto: CreateSalesAgentDto) {
     const code = this.normalizeCode(dto.code ?? dto.name);
+    const email = dto.email?.trim().toLowerCase() || null;
 
     await this.ensureCodeIsFree(code);
+
+    // Cuenta de panel: solo si mandan contraseña. Requiere correo porque es
+    // el identificador con el que se inicia sesión.
+    let adminUserId: string | null = null;
+
+    if (dto.panelPassword) {
+      if (!email) {
+        throw new BadRequestException(
+          'Para darle acceso al panel, el agente necesita un correo.',
+        );
+      }
+
+      adminUserId = await this.createPanelAccount(
+        dto.name.trim(),
+        email,
+        dto.panelPassword,
+      );
+    }
 
     return this.prisma.salesAgent.create({
       data: {
         code,
         linkToken: await this.generateUniqueLinkToken(),
         name: dto.name.trim(),
-        email: dto.email?.trim().toLowerCase() || null,
+        email,
         phone: dto.phone?.trim() || null,
         company: dto.company?.trim() || null,
         type: dto.type ?? 'INTERNAL',
         commissionPercent: dto.commissionPercent ?? 0,
         notes: dto.notes?.trim() || null,
         isActive: true,
+        adminUserId,
+      },
+      include: { adminUser: { select: { id: true, email: true, isActive: true } } },
+    });
+  }
+
+  /**
+   * Crea la cuenta con la que el agente entra al panel. El rol AGENT existe
+   * para poder distinguirlo del personal interno y para que la atribución de
+   * lo que captura salga de su sesión.
+   */
+  private async createPanelAccount(
+    name: string,
+    email: string,
+    password: string,
+  ): Promise<string> {
+    const existing = await this.prisma.adminUser.findUnique({
+      where: { email },
+    });
+
+    if (existing) {
+      throw new ConflictException(
+        `Ya existe una cuenta de panel con el correo ${email}.`,
+      );
+    }
+
+    const user = await this.prisma.adminUser.create({
+      data: {
+        name,
+        email,
+        password: hashPassword(password),
+        role: AdminRole.AGENT,
+        isActive: true,
       },
     });
+
+    return user.id;
+  }
+
+  /**
+   * Devuelve el agente ligado a una cuenta del panel. Lo usa el login para
+   * meter el código del agente en la sesión: así el panel puede atribuir sin
+   * que el agente pueda elegir a nombre de quién registra.
+   */
+  async findByAdminUserId(adminUserId: string) {
+    const agent = await this.prisma.salesAgent.findUnique({
+      where: { adminUserId },
+      select: { code: true, name: true, isActive: true, commissionPercent: true },
+    });
+
+    if (!agent || !agent.isActive) {
+      return null;
+    }
+
+    return agent;
   }
 
   async update(id: string, dto: UpdateSalesAgentDto) {
@@ -144,9 +221,54 @@ export class SalesAgentsService {
       data.notes = dto.notes.trim() || null;
     }
 
+    // Acceso al panel: alta de cuenta, cambio de contraseña o revocación.
+    if (dto.panelPassword) {
+      const email =
+        (dto.email?.trim().toLowerCase() || existing.email) ?? null;
+
+      if (!email) {
+        throw new BadRequestException(
+          'Para darle acceso al panel, el agente necesita un correo.',
+        );
+      }
+
+      if (existing.adminUserId) {
+        await this.prisma.adminUser.update({
+          where: { id: existing.adminUserId },
+          data: {
+            password: hashPassword(dto.panelPassword),
+            email,
+            isActive: true,
+          },
+        });
+      } else {
+        data.adminUser = {
+          connect: {
+            id: await this.createPanelAccount(
+              dto.name?.trim() || existing.name,
+              email,
+              dto.panelPassword,
+            ),
+          },
+        };
+      }
+    }
+
+    // Revocar el acceso desactiva la cuenta pero no la borra, para no perder
+    // el rastro de quién capturó cada reservación.
+    if (dto.panelAccessEnabled !== undefined && existing.adminUserId) {
+      await this.prisma.adminUser.update({
+        where: { id: existing.adminUserId },
+        data: { isActive: dto.panelAccessEnabled },
+      });
+    }
+
     const updated = await this.prisma.salesAgent.update({
       where: { id },
       data,
+      include: {
+        adminUser: { select: { id: true, email: true, isActive: true } },
+      },
     });
 
     // Si cambió el código, realineamos el snapshot de las reservaciones que

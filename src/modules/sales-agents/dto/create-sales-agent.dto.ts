@@ -9,6 +9,7 @@ import {
   IsString,
   Max,
   Min,
+  MinLength,
 } from 'class-validator';
 
 export class CreateSalesAgentDto {
@@ -63,4 +64,20 @@ export class CreateSalesAgentDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  /**
+   * Si se envía, se crea también la cuenta con la que el agente entra al panel
+   * (rol AGENT). Sin esto, el agente existe solo con su link de venta.
+   * El correo de acceso es el mismo `email` del agente.
+   */
+  @ApiPropertyOptional({
+    example: 'ContraseñaSegura123',
+    minLength: 8,
+    description:
+      'Contraseña de acceso al panel. Si se omite, el agente no podrá iniciar sesión.',
+  })
+  @IsOptional()
+  @IsString()
+  @MinLength(8)
+  panelPassword?: string;
 }
