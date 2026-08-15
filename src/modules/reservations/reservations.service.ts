@@ -541,6 +541,15 @@ export class ReservationsService {
           salesAgentCode: reservation.salesAgentCode,
           agentCommissionPercent: reservation.agentCommissionPercent,
 
+          settlement: {
+            totalMXN: this.centsToPesosOrZero(reservation.totalMXN),
+            paidMXN: this.centsToPesosOrZero(reservation.paidMXN),
+            balanceMXN: this.centsToPesosOrZero(
+              Math.max(reservation.totalMXN - reservation.paidMXN, 0),
+            ),
+            isSettled: reservation.paidMXN >= reservation.totalMXN,
+          },
+
           passengers: {
             adults: reservation.adults,
             children: reservation.children,
@@ -938,8 +947,19 @@ export class ReservationsService {
 
   private mapReservationWithAttribution<T extends MoneyRecord>(reservation: T) {
     const reference = this.resolveStoredReservationReference(reservation);
+
+    // El saldo se calcula antes de convertir a pesos para que pase por la
+    // misma normalización que el resto de los montos.
+    const withBalance = {
+      ...reservation,
+      balanceMXN: Math.max(
+        Number(reservation.totalMXN ?? 0) - Number(reservation.paidMXN ?? 0),
+        0,
+      ),
+    } as T;
+
     const normalizedReservation =
-      this.normalizeReservationMoneyForResponse(reservation);
+      this.normalizeReservationMoneyForResponse(withBalance);
 
     return {
       ...normalizedReservation,
@@ -975,6 +995,8 @@ export class ReservationsService {
       'subtotalMXN',
       'extrasMXN',
       'totalMXN',
+      'paidMXN',
+      'balanceMXN',
     ];
 
     for (const field of reservationMoneyFields) {

@@ -56,6 +56,41 @@ export class PaymentsController {
 
   /**
    * Protegido.
+   * Genera un link de cobro parcial (anticipo) para una reservación.
+   * Es de uso interno: lo dispara el panel, no el checkout público, porque
+   * el monto lo decide quien atiende la venta.
+   */
+  @common.Post('deposit-link')
+  @IntegrationProtected()
+  @ApiOperation({
+    summary: 'Generar link de anticipo o pago parcial de una reservación',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        folio: { type: 'string', example: 'RSV-260310-BNEJ68' },
+        amountMXN: {
+          type: 'number',
+          example: 1500,
+          description:
+            'Monto a cobrar ahora, en pesos. No puede superar el saldo pendiente.',
+        },
+      },
+      required: ['folio', 'amountMXN'],
+    },
+  })
+  async createDepositLink(
+    @common.Body() body: { folio: string; amountMXN: number },
+  ) {
+    return this.paymentsService.createDepositCheckout(
+      body.folio,
+      body.amountMXN,
+    );
+  }
+
+  /**
+   * Protegido.
    * Consulta el estado de pago por folio.
    * Acepta Basic Auth o headers x-api-key / x-api-secret.
    */

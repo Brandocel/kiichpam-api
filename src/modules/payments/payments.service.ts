@@ -214,6 +214,10 @@ export class PaymentsService {
           amountUnit: 'centavos',
           totalCentavos: String(stripeAmount),
           totalMXN: String(stripeAmount / 100),
+          // Intención declarada. Sirve de respaldo para etiquetar el método
+          // mientras no exista un cargo liquidado que lo confirme, porque
+          // automatic_payment_methods lista todos los métodos de la cuenta.
+          paymentType: 'card',
         },
         description: `Pago de reservación ${reservation.folio}`,
         automatic_payment_methods: {
@@ -235,6 +239,161 @@ export class PaymentsService {
     );
 
     return this.buildCardResponse(reservation, paymentIntent, currency);
+  }
+
+  /**
+   * Genera un link de cobro por una parte del total (anticipo).
+   *
+   * Sustituye a los Payment Links que hoy se crean a mano en el dashboard de
+   * Stripe: al pasar por aquí, el cobro queda amarrado al folio, aparece en la
+   * tabla Payment y cuenta para las métricas y la comisión del agente.
+   *
+   * El paquete y el precio salen de la reservación, que a su vez viene del
+   * catálogo cargado: el agente solo elige cuánto se cobra ahora.
+   */
+  async createDepositCheckout(folio: string, amountMXN: number) {
+    if (!folio || typeof folio !== 'string') {
+      throw new BadRequestException('El folio es obligatorio');
+    }
+
+    const normalizedFolio = folio.trim().toUpperCase();
+
+    const reservation = await this.prisma.reservation.findUnique({
+      where: { folio: normalizedFolio },
+      include: {
+        package: {
+          include: this.packageEmailInclude,
+        },
+      },
+    });
+
+    if (!reservation) {
+      throw new NotFoundException(
+        `No existe la reservación con folio ${normalizedFolio}`,
+      );
+    }
+
+    if (reservation.status === 'PAID') {
+      throw new BadRequestException('La reservación ya está liquidada');
+    }
+
+    const currency = (reservation.currency ?? 'MXN').toLowerCase();
+
+    if (currency !== 'mxn') {
+      throw new BadRequestException(
+        'Por seguridad, solo se permiten pagos en MXN',
+      );
+    }
+
+    if (!Number.isFinite(amountMXN) || amountMXN <= 0) {
+      throw new BadRequestException('El monto del anticipo es inválido');
+    }
+
+    const amountCentavos = Math.round(Number(amountMXN) * 100);
+
+    // Stripe no procesa cobros ridículamente chicos en MXN.
+    if (amountCentavos < 1000) {
+      throw new BadRequestException(
+        'El anticipo mínimo que acepta Stripe es de $10.00 MXN',
+      );
+    }
+
+    const balanceCentavos = Math.max(
+      reservation.totalMXN - reservation.paidMXN,
+      0,
+    );
+
+    if (balanceCentavos <= 0) {
+      throw new BadRequestException(
+        'Esta reservación ya no tiene saldo pendiente',
+      );
+    }
+
+    // El tope es el saldo, no el total: así dos anticipos nunca cobran de más.
+    if (amountCentavos > balanceCentavos) {
+      throw new BadRequestException(
+        `El monto no puede superar el saldo pendiente de $${(balanceCentavos / 100).toFixed(2)} MXN`,
+      );
+    }
+
+    const isSettlingPayment = amountCentavos === balanceCentavos;
+
+    const packageName =
+      reservation.snapshotName ??
+      reservation.package?.translations?.[0]?.name ??
+      reservation.package?.code ??
+      'Reservación';
+
+    const siteUrl = (
+      process.env.FRONTEND_URL || 'https://www.cenotexunaan.com'
+    ).replace(/\/$/, '');
+
+    const session = await this.stripe.checkout.sessions.create({
+      mode: 'payment',
+      success_url: `${siteUrl}/es/reservar?folio=${normalizedFolio}&pago=exitoso`,
+      cancel_url: `${siteUrl}/es/reservar?folio=${normalizedFolio}&pago=cancelado`,
+      line_items: [
+        {
+          quantity: 1,
+          price_data: {
+            currency: 'mxn',
+            unit_amount: amountCentavos,
+            product_data: {
+              name: isSettlingPayment
+                ? `${packageName} — pago restante`
+                : `${packageName} — anticipo`,
+              description: `Reservación ${normalizedFolio}`,
+            },
+          },
+        },
+      ],
+      metadata: {
+        folio: normalizedFolio,
+        reservationId: reservation.id,
+        paymentKind: 'DEPOSIT',
+      },
+      // La metadata del intent es la que lee el webhook para saber que se
+      // trata de un cobro parcial y no marcar la reservación como liquidada.
+      payment_intent_data: {
+        description: `Anticipo de reservación ${normalizedFolio}`,
+        metadata: {
+          folio: normalizedFolio,
+          reservationId: reservation.id,
+          packageId: reservation.packageId,
+          amountUnit: 'centavos',
+          paymentKind: 'DEPOSIT',
+          totalCentavos: String(reservation.totalMXN),
+        },
+      },
+    });
+
+    await this.prisma.reservationTrace.create({
+      data: {
+        reservationId: reservation.id,
+        folio: normalizedFolio,
+        step: 'DEPOSIT_LINK_CREATED',
+        message: `Link de anticipo generado por $${(amountCentavos / 100).toFixed(2)} MXN`,
+        metadata: {
+          checkoutSessionId: session.id,
+          amountCentavos,
+          balanceBeforeCentavos: balanceCentavos,
+          isSettlingPayment,
+        },
+      },
+    });
+
+    return {
+      folio: normalizedFolio,
+      url: session.url,
+      checkoutSessionId: session.id,
+      amountMXN: amountCentavos / 100,
+      totalMXN: reservation.totalMXN / 100,
+      paidMXN: reservation.paidMXN / 100,
+      balanceAfterMXN: (balanceCentavos - amountCentavos) / 100,
+      expiresAt: session.expires_at
+        ? new Date(session.expires_at * 1000).toISOString()
+        : null,
+    };
   }
 
   async createOxxoReference(folio: string) {
@@ -499,11 +658,23 @@ export class PaymentsService {
 
     this.validateStripeAmountMatchesReservation(reservation, paymentIntent);
 
+    // Igual que en el webhook: primero se registra el movimiento para saber
+    // cuánto lleva cubierto y recién entonces se decide el estado.
+    await this.paymentRecordsService.registerFromPaymentIntent(
+      reservation,
+      paymentIntent,
+    );
+
+    const settlement =
+      await this.paymentRecordsService.recalculateReservationBalance(
+        reservation.id,
+      );
+
     let newStatus = reservation.status;
 
     switch (paymentIntent.status) {
       case 'succeeded':
-        newStatus = 'PAID';
+        newStatus = settlement?.isSettled === false ? 'PARTIALLY_PAID' : 'PAID';
         break;
 
       case 'processing':
@@ -548,16 +719,6 @@ export class PaymentsService {
         },
       },
     });
-
-    /*
-      También reconstruye el movimiento en la tabla Payment.
-      Sirve para reservaciones antiguas que se pagaron antes de
-      que el cobro quedara registrado en base de datos.
-    */
-    await this.paymentRecordsService.registerFromPaymentIntent(
-      updatedReservation,
-      paymentIntent,
-    );
 
     if (newStatus === 'PAID') {
       await this.syncReservationToGoogleCalendar(normalizedFolio);
@@ -898,15 +1059,35 @@ export class PaymentsService {
 
     this.validateStripeAmountMatchesReservation(reservation, paymentIntent);
 
+    // Se registra el movimiento ANTES de decidir el estado: eso recalcula
+    // cuánto lleva pagado la reservación y permite distinguir un anticipo de
+    // una liquidación. Marcar PAID sin mirar el saldo haría que un anticipo
+    // del 50% apareciera como pagado completo.
+    await this.paymentRecordsService.registerFromPaymentIntent(
+      reservation,
+      paymentIntent,
+    );
+
+    const balance = await this.paymentRecordsService.recalculateReservationBalance(
+      reservation.id,
+    );
+
+    const isSettled = balance?.isSettled ?? true;
+    const newStatus = isSettled ? 'PAID' : 'PARTIALLY_PAID';
+
     const updatedReservation = await this.prisma.reservation.update({
       where: { folio },
       data: {
-        status: 'PAID',
+        status: newStatus,
         traces: {
           create: {
             folio,
-            step: 'STRIPE_PAYMENT_SUCCEEDED',
-            message: 'Stripe confirmed payment_intent.succeeded',
+            step: isSettled
+              ? 'STRIPE_PAYMENT_SUCCEEDED'
+              : 'STRIPE_DEPOSIT_SUCCEEDED',
+            message: isSettled
+              ? 'Stripe confirmed payment_intent.succeeded'
+              : 'Stripe confirmó un anticipo: queda saldo pendiente',
             metadata: {
               stripePaymentIntentId: paymentIntent.id,
               stripeStatus: paymentIntent.status,
@@ -915,6 +1096,8 @@ export class PaymentsService {
               amountMXN: paymentIntent.amount / 100,
               currency: paymentIntent.currency,
               previousStatus: reservation.status,
+              paidCentavos: balance?.paidMXN ?? null,
+              balanceCentavos: balance?.balanceMXN ?? null,
             },
           },
         },
@@ -929,10 +1112,14 @@ export class PaymentsService {
       },
     });
 
-    await this.paymentRecordsService.registerFromPaymentIntent(
-      updatedReservation,
-      paymentIntent,
-    );
+    // El correo de confirmación y el evento de calendario solo salen cuando la
+    // reservación queda liquidada: un anticipo todavía no garantiza la visita.
+    if (!isSettled) {
+      this.logger.log(
+        `Anticipo registrado para folio=${folio}. Pagado=${(balance?.paidMXN ?? 0) / 100} Saldo=${(balance?.balanceMXN ?? 0) / 100}`,
+      );
+      return;
+    }
 
     await this.syncReservationToGoogleCalendar(folio);
     await this.sendPaidReservationEmailsFromWebhook(updatedReservation);
@@ -1074,6 +1261,17 @@ export class PaymentsService {
     );
   }
 
+  /**
+   * Verifica que lo cobrado en Stripe sea coherente con la reservación.
+   *
+   * Antes se exigía igualdad exacta con el total, lo que hacía imposible un
+   * anticipo. Ahora se acepta cualquier monto que no **exceda** el total: un
+   * cobro de más sigue siendo un error grave (precio manipulado) y se bloquea,
+   * pero cobrar de menos es un pago parcial legítimo.
+   *
+   * Los anticipos se marcan con `paymentKind=DEPOSIT` en la metadata, así que
+   * un intent sin esa marca que no cubra el total sí se reporta como anomalía.
+   */
   private validateStripeAmountMatchesReservation(
     reservation: { folio: string; totalMXN: unknown },
     paymentIntent: Stripe.PaymentIntent,
@@ -1084,13 +1282,21 @@ export class PaymentsService {
 
     const stripeAmount = paymentIntent.amount_received || paymentIntent.amount;
 
-    if (stripeAmount !== reservationAmount) {
+    if (stripeAmount > reservationAmount) {
       this.logger.error(
-        `[PAYMENT_AMOUNT_MISMATCH] folio=${reservation.folio} reservationCentavos=${reservationAmount} stripeCentavos=${stripeAmount} reservationMXN=${reservationAmount / 100} stripeMXN=${stripeAmount / 100}`,
+        `[PAYMENT_AMOUNT_OVERCHARGE] folio=${reservation.folio} reservationCentavos=${reservationAmount} stripeCentavos=${stripeAmount} reservationMXN=${reservationAmount / 100} stripeMXN=${stripeAmount / 100}`,
       );
 
       throw new BadRequestException(
-        'El monto pagado en Stripe no coincide con el total de la reservación. No se marcará como pagada por seguridad.',
+        'El monto cobrado en Stripe es mayor al total de la reservación. No se marcará como pagada por seguridad.',
+      );
+    }
+
+    const isDeposit = paymentIntent.metadata?.paymentKind === 'DEPOSIT';
+
+    if (stripeAmount < reservationAmount && !isDeposit) {
+      this.logger.warn(
+        `[PAYMENT_PARTIAL_UNDECLARED] folio=${reservation.folio} reservationCentavos=${reservationAmount} stripeCentavos=${stripeAmount}. Se registrará como pago parcial.`,
       );
     }
   }

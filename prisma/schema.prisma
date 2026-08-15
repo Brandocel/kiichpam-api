@@ -370,6 +370,12 @@ model Reservation {
   extrasMXN         Int @default(0)
   totalMXN          Int @default(0)
 
+  /// Suma de los pagos liquidados, en centavos. Se recalcula desde la tabla
+  /// Payment cada vez que se registra un movimiento, así que es un
+  /// denormalizado seguro: la fuente de verdad siguen siendo los pagos.
+  /// El saldo es totalMXN - paidMXN.
+  paidMXN Int @default(0)
+
   currency String @default("MXN")
   status   String @default("DRAFT")
 
@@ -446,6 +452,10 @@ model Payment {
   provider      String
   method        String
   status        String @default("PENDING")
+
+  /// FULL = cobro del total. DEPOSIT = anticipo o pago parcial.
+  /// ONSITE = liquidación cobrada en el cenote (efectivo o terminal).
+  kind String @default("FULL")
 
   amountMXN Int
   reference String?
