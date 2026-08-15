@@ -5,6 +5,7 @@ import {
 import {
   IsArray,
   IsDateString,
+  IsEmail,
   IsInt,
   IsOptional,
   IsString,
@@ -140,6 +141,44 @@ export class QuoteDto {
   @IsOptional()
   @IsString()
   agentCode?: string;
+
+  /*
+   * Datos de contacto opcionales.
+   *
+   * La web los manda al crear la reservación para que no queden folios
+   * huérfanos: antes se creaba el borrador en el paso del paquete y, si el
+   * visitante abandonaba, quedaba una reservación sin nombre ni correo.
+   * Siguen siendo opcionales porque /quote usa este mismo DTO.
+   */
+  @ApiPropertyOptional({ example: 'María' })
+  @IsOptional()
+  @IsString()
+  firstName?: string;
+
+  @ApiPropertyOptional({ example: 'López' })
+  @IsOptional()
+  @IsString()
+  lastName?: string;
+
+  @ApiPropertyOptional({ example: 'maria@gmail.com' })
+  @IsOptional()
+  @IsEmail()
+  email?: string;
+
+  @ApiPropertyOptional({ example: '9981234567' })
+  @IsOptional()
+  @IsString()
+  phone?: string;
+
+  @ApiPropertyOptional({ example: 'México' })
+  @IsOptional()
+  @IsString()
+  country?: string;
+
+  @ApiPropertyOptional({ example: 'Llegamos temprano' })
+  @IsOptional()
+  @IsString()
+  comments?: string;
 
   @ApiPropertyOptional({ example: 'es' })
   @IsOptional()

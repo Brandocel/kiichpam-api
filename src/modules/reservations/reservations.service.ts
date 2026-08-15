@@ -104,6 +104,16 @@ export class ReservationsService {
           children: dto.children,
           infants: dto.infants,
 
+          // Vienen desde el paso de contacto de la web. Si no llegan, la
+          // reservación se crea igual (por ejemplo desde el panel) y los datos
+          // se completan después con PATCH /:folio/contact.
+          firstName: dto.firstName?.trim() || null,
+          lastName: dto.lastName?.trim() || null,
+          email: dto.email?.trim().toLowerCase() || null,
+          phone: dto.phone?.trim() || null,
+          country: dto.country?.trim() || null,
+          comments: dto.comments?.trim() || null,
+
           campaignCode: calculation.primaryCampaignCode,
           appliedCampaignCodes: calculation.appliedCampaignCodes,
 
